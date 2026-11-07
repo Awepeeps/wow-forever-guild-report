@@ -87,6 +87,9 @@ const characterOverrideSchema = characterSchema.extend({
   secondary: characterSchema.shape.secondary.removeDefault().optional(),
 });
 export const regionSchema = z.enum(["us", "eu", "kr", "tw"]);
+const guildRankNamesSchema = z
+  .record(z.string().regex(/^(?:0|[1-9]\d{0,2})$/), name)
+  .default({});
 export const configSchema = z
   .object({
     version: z.literal(1),
@@ -108,6 +111,7 @@ export const configSchema = z
       ])
       .default("en_US"),
     guild: slugSchema.optional(),
+    guildRankNames: guildRankNamesSchema,
     characters: z.array(characterOverrideSchema).max(2_000).default([]),
   })
   .strict()
@@ -143,6 +147,7 @@ export const snapshotSchema = z
     region: regionSchema,
     generatedAt: z.iso.datetime(),
     guild: z.string().nullable(),
+    guildRankNames: guildRankNamesSchema,
     rows: z.array(rowSchema).max(2_000),
   })
   .strict()
@@ -188,6 +193,8 @@ export function sortRows(rows: RosterRow[]): RosterRow[] {
     a.localeCompare(b, "en");
   return rows.sort(
     (a, b) =>
+      (a.character.guildRank ?? Number.MAX_SAFE_INTEGER) -
+        (b.character.guildRank ?? Number.MAX_SAFE_INTEGER) ||
       Number(!a.discord) - Number(!b.discord) ||
       compare(a.discord, b.discord) ||
       compare(a.character.name, b.character.name) ||
@@ -205,6 +212,7 @@ export function manualSnapshot(
     region: config.region,
     generatedAt: now.toISOString(),
     guild: config.guild ?? null,
+    guildRankNames: config.guildRankNames,
     rows: sortRows(
       config.characters.map((entry) => ({
         character: characterSchema.parse(entry),

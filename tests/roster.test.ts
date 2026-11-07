@@ -457,3 +457,50 @@ test("groups Discord alts, uses deterministic character order, puts unmapped las
   expect(partial.rows[0]?.professionFetchedAt).toBe(now.toISOString());
   expect(partial.rows[0]?.fetchedAt).toBe(later.toISOString());
 });
+
+test("rank labels validate at config boundaries, survive snapshots, and ranks control stored sort order", async () => {
+  for (const key of ["-1", "01", "1000", "1.5", "name"]) {
+    expect(
+      configSchema.safeParse({ ...config, guildRankNames: { [key]: "Label" } })
+        .success,
+    ).toBe(false);
+  }
+  expect(
+    configSchema.safeParse({ ...config, guildRankNames: { "0": "   " } })
+      .success,
+  ).toBe(false);
+  expect(
+    snapshotSchema.parse({ ...snapshot, guildRankNames: undefined })
+      .guildRankNames,
+  ).toEqual({});
+  const cfg = configSchema.parse({
+    ...config,
+    guildRankNames: { "0": " Guild Master ", "1": "Officer" },
+    characters: [],
+  });
+  const result = await refreshRoster(
+    cfg,
+    { "us:leader": "Zebra", "us:officer": "Alice" },
+    source({
+      guild: async () => [
+        characterSchema.parse({
+          slug: "officer",
+          name: "Officer",
+          guildRank: 1,
+        }),
+        characterSchema.parse({ slug: "leader", name: "Leader", guildRank: 0 }),
+        characterSchema.parse({ slug: "unknown", name: "Unknown" }),
+      ],
+    }),
+    now,
+  );
+  expect(result.rows.map((r) => r.character.slug)).toEqual([
+    "leader",
+    "officer",
+    "unknown",
+  ]);
+  expect(snapshotSchema.parse(result).guildRankNames).toEqual({
+    "0": "Guild Master",
+    "1": "Officer",
+  });
+});

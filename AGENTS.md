@@ -19,11 +19,11 @@ Keep validation at trust boundaries, pure transforms easy to test, and external 
 
 ## Domain invariants
 
-Forever identities are region + character ID where available, otherwise region + API slug. Names include a surname; rulesets replace realms. Prefer API slugs over reconstruction. Discord names/IDs stay strings. Guild rank is the numeric API value, not an inferred title.
+Forever identities are region + character ID where available, otherwise region + API slug. Names include a surname; rulesets replace realms. Prefer API slugs over reconstruction. Discord names/IDs stay strings. Guild rank stays the numeric API value; display names come only from the private guildRankNames mapping, never inference.
 
-Characters sort by Discord, then character name, unmapped last, with deterministic ties. Talent points come from `spent_points` for active groups; never guess a spec or sum different groups. Preserve every returned profession tier and secondary profession. Unknown is not zero.
+Characters and Professions sort by numeric guild rank, Discord, then character name, with unknown ranks last and unmapped Discord entries last within rank; ties are deterministic. Talent points come from `spent_points` for active groups; never guess a spec or sum different groups. Preserve every returned profession tier and secondary profession. Unknown is not zero.
 
-Tab order is Characters, Professions, Guild Info, Export Notes. Keep skill details in Professions, technical diagnostics in hidden columns, and Notes visible and human-owned. Only an owned legacy Data Notes tab may migrate to Export Notes; never rename an unmanaged tab or overwrite a name collision.
+Tab order is Characters, Professions, Guild Info, Automated Export Info. Professions has one row per character with primary and secondary summaries preserving all tiers. Keep technical diagnostics hidden and Player Notes (Editable) visible and independently human-owned on both roster tabs. Only owned legacy Data Notes/Export Notes tabs may migrate to Automated Export Info; never rename an unmanaged tab or overwrite a collision. Legacy Characters Notes migrates by header name and identity.
 
 A guild lookup/auth failure must not publish an empty successful roster. Individual endpoint failures keep prior/supplied data and mark it incomplete. Keep last-success timestamps when values are retained. `Generated At`/fetch times must not be represented as Blizzard update times.
 

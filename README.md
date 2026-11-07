@@ -19,16 +19,20 @@ just demo        # synthetic data, no credentials/network API access
 
 Open `output/demo/roster.xlsx` in Excel, LibreOffice, or Google Sheets. It has frozen headers and filters:
 
-| Tab          | Contents                                                                                            |
-| ------------ | --------------------------------------------------------------------------------------------------- |
-| Characters   | Compact roster: Discord, name, class, level, guild rank, talent points, human Notes and API status  |
-| Professions  | One row per character/profession/tier, including all secondaries and skill/max                      |
-| Guild Info   | Guild, region, generation timestamp, counts by class/faction/ruleset, mapping and API availability  |
-| Export Notes | How to read the export: layout, class colors, identity, freshness, source links and API limitations |
+| Tab                   | Contents                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| Characters            | Discord, character, class, level, guild rank label, talent points, API status, Player Notes (Editable) |
+| Professions           | One row per character: primary professions, secondary professions, status, Player Notes (Editable)     |
+| Guild Info            | Guild, region, generation timestamp, class/faction/ruleset counts and API availability                 |
+| Automated Export Info | Layout, class colors, identity, freshness, source links and API limitations                            |
 
-Characters and Professions sit side by side, with Discord/name columns frozen. Class cells use recognizable WoW colors with contrasting text; Priest uses light gray. Guild Info shows the export timestamp. Race, faction, ruleset, identity, repeated generation times and per-component diagnostics remain in hidden columns that can be unhidden. CSV files include every column. Professions labels retained data explicitly and keeps characters with unavailable data as placeholder rows rather than silently omitting them.
+Characters and Professions sit side by side, with Discord/name columns frozen. Both sort by **numeric guild rank, then Discord name, then character name**. Unknown ranks come last; within each rank, unmapped Discord entries come last. Names compare in English with case-insensitive grouping and deterministic case ties; the API slug breaks remaining ties. API return order does not affect the workbook, including when rendering an older snapshot.
 
-Each export also includes four CSV files and `snapshot.json`. Offline `just export` defaults to `output/export/`; API `just refresh` defaults to `output/roster/`. Offline export refuses to replace a snapshot containing API statuses, even with an explicit output path. Characters sort by **Discord name, then character name, with unmapped characters last**; ties use the API slug. Names compare in English with case-insensitive grouping and deterministic case ties. API return order does not affect the workbook.
+Professions shades contiguous runs of the same Discord player on the name columns. Rank-first sorting can split one player’s characters across ranks; shading does not imply a global player group. Each category cell lists every profession/tier on its own line as `Alchemy (Classic) — 50/75`; `?` means unknown and `0` remains zero. Characters without available professions stay visible with an explicit status. Both tabs have independent **Player Notes (Editable)** columns; local exports leave them blank.
+
+Class cells use recognizable WoW colors with contrasting text; Priest uses light gray. Guild Info shows the export timestamp. Race, faction, ruleset, numeric rank, identity, repeated generation times and component diagnostics remain in hidden columns that can be unhidden. CSV files include every column.
+
+Each export includes four CSV files and `snapshot.json`. Offline `just export` defaults to `output/export/`; API `just refresh` defaults to `output/roster/`. Offline export refuses to replace a snapshot containing API statuses, even with an explicit output path.
 
 ## Configure your guild
 
@@ -49,6 +53,7 @@ Set your actual guild slug/region in `.local/roster.json`:
   "region": "us",
   "locale": "en_US",
   "guild": "your-guild-slug",
+  "guildRankNames": { "0": "Guild Master", "1": "Officer", "2": "Veteran" },
   "characters": []
 }
 ```
@@ -91,7 +96,7 @@ Retention matches stable character IDs across renames. Slug fallback is used onl
 
 Talents display actual points such as `Shadow Magic 5, Discipline 2`. They come from `spent_points` in active specialization groups, never from a guessed role, talent count, or summed talent ranks. Multiple active groups are labelled separately and never summed together. A known empty group means no allocated points; an unsupported response is flagged rather than treated as zero. Inactive builds are not shown.
 
-Guild Rank is the **numeric API rank**, with 0 for guild master; custom rank titles are not guessed. Profession tiers are retained individually. Skill `0` is distinct from unknown (blank/`unknown`). All returned secondary professions are included, such as Cooking, Fishing, and First Aid where supported.
+The live US guild/profile and roster APIs were checked on 2026-11-07: ranks are numeric and no rank-title field was returned. Put your guild’s confirmed titles in the optional `guildRankNames` object in the ignored roster config; keys must be integer strings `0`–`999` and values nonempty labels. Guild Rank displays that label or `Rank N (unmapped)`. The numeric API value remains canonical, controls sorting, and is retained in the hidden Guild Rank Number column. The mapping is saved in each snapshot for reproducible offline exports; old snapshots default to an empty map. Custom titles are never guessed. All profession tiers and returned secondaries are retained; `?` denotes unknown skill/maximum, distinct from `0`.
 
 Guild Info shows **Generated At** in UTC; repeated generation times on Characters and Professions are hidden by default. **Fetched At** is the refresh attempt time; per-component **Last Success** columns indicate when retained data was last retrieved successfully. These timestamps describe this tool's fetches, not Blizzard's underlying update time. Blizzard profiles can lag until logout. Failed requests retain prior values, with failure status and the prior last-success timestamp.
 
@@ -108,13 +113,13 @@ Set `GOOGLE_SPREADSHEET_ID` to the ID in the sheet URL, then run:
 just sheets     # publish output/roster/snapshot.json
 ```
 
-The tool creates Characters, Professions, Guild Info, and Export Notes with ownership metadata and places them first in that order. A managed Data Notes tab is renamed to Export Notes in the same atomic batch, preserving its sheet ID; a collision stops the update. Unmanaged tabs are never renamed. Later updates replace only the owned tabs. An existing target tab with no ownership marker is refused before any write: **human tabs are never taken over**. To add generated tabs to an existing hand-maintained spreadsheet, first rename its clashing tabs (for example `Characters (old)`). Other tabs keep their contents. Don't remove the ownership metadata or change the generated identity/header columns.
+The tool creates Characters, Professions, Guild Info, and Automated Export Info with ownership metadata and places them first in that order. An owned Data Notes or Export Notes tab is renamed to Automated Export Info in the same atomic batch, preserving its sheet ID; multiple owned legacy tabs or a target-name collision stop the update. Unmanaged tabs are never renamed. Later updates replace only the owned tabs. An existing target tab with no ownership marker is refused before any write: **human tabs are never taken over**. To add generated tabs to an existing hand-maintained spreadsheet, first rename its clashing tabs (for example `Characters (old)`). Other tabs keep their contents. Don't remove the ownership metadata or change the generated identity/header columns.
 
-**Notes belongs to humans.** CSV/API imports never read Notes, and local exports leave that column blank. In managed Google Sheets, existing Notes cell values are carried by region + character identity when rows reorder. If a departing/unidentified character has Notes, publishing stops before changing the sheet; archive the note elsewhere and clear the old cell before retrying. Avoid editing Notes during publishing: the Sheets API has no compare-and-swap for concurrent cell edits. Keep long-term freeform notes in a separate human-owned tab if you need independent editing.
+**Player Notes (Editable) belongs to humans.** CSV/API/config never supply notes, and local exports leave those columns blank. In managed Google Sheets, Characters and Professions preserve their own notes by region + character identity when rows reorder. The old Characters Notes header migrates automatically; the legacy multi-row Professions layout gains a new, empty notes column. Notes are never copied between the two tabs. ID-based notes never attach to a conflicting ID; a legacy slug-only note may upgrade to the current ID at that slug because no prior ID exists to distinguish a rename/upgrade from name reuse. Prefer stable-ID snapshots and avoid editing hidden identity cells. Missing or ambiguous editable headers stop publication instead of discarding notes. If a departing/unidentified character has Notes, publishing stops before changing the sheet; archive the note elsewhere and clear the old cell before retrying. Avoid editing Notes during publishing: the Sheets API has no compare-and-swap for concurrent cell edits. Keep long-term freeform notes in a separate human-owned tab if you need independent editing.
 
 Notes cell values and cell formatting are preserved by identity, including when the column moves. Duplicate identities with Notes content or formatting stop publication until the duplicate rows are resolved. Other generated formatting, dimensions, filters, and cells are tool-owned. Service account tokens are minted in memory; private keys and access tokens are never placed in workbook output. A failed write is not retried automatically because the outcome may be ambiguous.
 
-The Export Notes rename also changes the generated CSV filename from `data-notes.csv` to `export-notes.csv`; update scripts using the old name. Sheets requests exceeding 8 MB stop before writing; very large rosters or extensive Notes formatting may require using the XLSX export instead.
+The information-tab rename changes the generated CSV filename from `data-notes.csv` / `export-notes.csv` to `automated-export-info.csv`; update scripts using either old name. Profession CSV rows now contain category summaries rather than one row per skill/tier. Sheets requests exceeding 8 MB stop before writing; very large rosters or extensive Notes formatting may require using the XLSX export instead.
 
 ## Import the existing roster
 

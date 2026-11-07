@@ -14,6 +14,27 @@ const classColors: Record<string, string> = {
   evoker: "33937F",
 };
 
+export const playerNotesHeader = "Player Notes (Editable)";
+export function isPlayerNotesHeader(header: unknown): boolean {
+  return header === playerNotesHeader || header === "Notes";
+}
+
+// Empty Discord mappings identify separate characters, never a shared player.
+export function playerGroups(
+  rows: readonly (readonly (string | number)[])[],
+): { start: number; end: number; shaded: boolean }[] {
+  const groups: { start: number; end: number; shaded: boolean }[] = [];
+  let previous: string | number | undefined;
+  for (let i = 1; i < rows.length; i++) {
+    const discord = rows[i]?.[0];
+    const group = groups.at(-1);
+    if (group && discord && discord === previous) group.end = i + 1;
+    else groups.push({ start: i, end: i + 1, shaded: groups.length % 2 === 0 });
+    previous = discord;
+  }
+  return groups;
+}
+
 export function classStyle(name: string): {
   background: string;
   foreground: string;
@@ -57,6 +78,7 @@ export function columnPresentation(
     "Talents Last Success",
     "Sync Notes",
     "Generated At",
+    "Guild Rank Number",
   ]);
   const hidden =
     technical.has(header) ||
@@ -66,9 +88,9 @@ export function columnPresentation(
     "Character Name": 170,
     Class: 100,
     Level: 75,
-    "Guild Rank": 70,
+    "Guild Rank": 110,
     "Talent Points": 190,
-    Notes: 200,
+    [playerNotesHeader]: 200,
     "API Status": 110,
     "Generated At": 165,
     Profession: 150,
@@ -76,7 +98,9 @@ export function columnPresentation(
     Tier: 130,
     Skill: 65,
     Maximum: 80,
-    "Profession API Status": 150,
+    "Primary Professions": 230,
+    "Secondary Professions": 250,
+    "Profession API Status": 120,
     Topic: 220,
     Details: 720,
     Metric: 300,

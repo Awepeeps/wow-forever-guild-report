@@ -1,6 +1,11 @@
 import { strToU8, zipSync } from "fflate";
-import type { Snapshot } from "./model.ts";
-import { classStyle, columnPresentation } from "./presentation.ts";
+import { type Profession, type Snapshot, sortRows } from "./model.ts";
+import {
+  classStyle,
+  columnPresentation,
+  playerGroups,
+  playerNotesHeader,
+} from "./presentation.ts";
 
 export type Cell = string | number;
 export interface Table {
@@ -17,8 +22,8 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Level",
       "Guild Rank",
       "Talent Points",
-      "Notes",
       "API Status",
+      playerNotesHeader,
       "Generated At",
       "Ruleset",
       "Faction",
@@ -34,6 +39,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Professions Last Success",
       "Talents Last Success",
       "Sync Notes",
+      "Guild Rank Number",
     ],
   ];
   const professions: Cell[][] = [
@@ -41,12 +47,10 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Discord",
       "Character Name",
       "Class",
-      "Profession",
-      "Category",
-      "Tier",
-      "Skill",
-      "Maximum",
+      "Primary Professions",
+      "Secondary Professions",
       "Profession API Status",
+      playerNotesHeader,
       "Generated At",
       "Professions Last Success",
       "Region",
@@ -54,7 +58,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Character ID",
     ],
   ];
-  for (const row of snapshot.rows) {
+  for (const row of sortRows([...snapshot.rows])) {
     const c = row.character;
     const statuses = [
       row.profileStatus,
@@ -76,18 +80,21 @@ export function buildTables(snapshot: Snapshot): Table[] {
       c.name,
       c.class,
       c.level ?? "",
-      c.guildRank ?? "",
+      c.guildRank === undefined
+        ? ""
+        : (snapshot.guildRankNames[String(c.guildRank)] ??
+          `Rank ${c.guildRank} (unmapped)`),
       c.talents
         .map(
           (t) => `${t.group ? `Group ${t.group}: ` : ""}${t.tree} ${t.points}`,
         )
         .join(", "),
-      "",
       statuses.every((s) => s === "manual")
         ? "Manual"
         : statuses.every((s) => s === "ok")
           ? "Complete"
           : "Incomplete",
+      "",
       snapshot.generatedAt,
       c.ruleset,
       c.faction,
@@ -103,48 +110,33 @@ export function buildTables(snapshot: Snapshot): Table[] {
       row.professionFetchedAt ?? "",
       row.talentFetchedAt ?? "",
       row.issue.trim(),
+      c.guildRank ?? "",
     ]);
-    for (const [category, list] of [
-      ["Primary", c.primary],
-      ["Secondary", c.secondary],
-    ] as const) {
-      for (const p of list)
-        professions.push([
-          row.discord,
-          c.name,
-          c.class,
-          p.name,
-          category,
-          p.tier ?? "",
-          p.skill ?? "",
-          p.max ?? "",
-          professionStatus,
-          snapshot.generatedAt,
-          row.professionFetchedAt ?? "",
-          snapshot.region,
-          c.slug,
-          c.id ?? "",
-        ]);
-    }
-    if (!c.primary.length && !c.secondary.length)
-      professions.push([
-        row.discord,
-        c.name,
-        c.class,
-        ["error", "unavailable"].includes(row.professionStatus)
+    const describe = (list: Profession[]) =>
+      list.length
+        ? list
+            .map(
+              (p) =>
+                `${p.name}${p.tier ? ` (${p.tier})` : ""} — ${p.skill ?? "?"}/${p.max ?? "?"}`,
+            )
+            .join("\n")
+        : ["error", "unavailable"].includes(row.professionStatus)
           ? "Unavailable"
-          : "None reported",
-        "",
-        "",
-        "",
-        "",
-        professionStatus,
-        snapshot.generatedAt,
-        row.professionFetchedAt ?? "",
-        snapshot.region,
-        c.slug,
-        c.id ?? "",
-      ]);
+          : "None reported";
+    professions.push([
+      row.discord,
+      c.name,
+      c.class,
+      describe(c.primary),
+      describe(c.secondary),
+      professionStatus,
+      "",
+      snapshot.generatedAt,
+      row.professionFetchedAt ?? "",
+      snapshot.region,
+      c.slug,
+      c.id ?? "",
+    ]);
   }
   const guild: Cell[][] = [
     ["Metric", "Value"],
@@ -181,7 +173,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ["Topic", "Details"],
     [
       "Layout",
-      "Characters is the roster overview; Professions has all primary/secondary skills and tiers. Guild Info shows the export timestamp. Technical identity, status, generation and last-success columns are hidden by default and can be unhidden. CSV files include all columns.",
+      "Characters is the roster overview; Professions has one row per character with primary/secondary skills and tiers in separate cells. Both sort by numeric guild rank, Discord, then character name. Shading marks contiguous player groups; rank-first order can split one player's characters across ranks. Guild Info shows the export timestamp. Technical identity, status, generation and last-success columns are hidden by default and can be unhidden. CSV files include all columns.",
     ],
     [
       "Class colors",
@@ -197,7 +189,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Levels",
-      "Unknown skill is blank/unknown, never zero. Each returned profession tier is retained in Professions.",
+      "Profession cells show skill/maximum; ? means unknown, never zero. Each returned profession tier is retained on its own line in Professions.",
     ],
     [
       "Secondaries",
@@ -205,7 +197,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Manual fields",
-      "Discord names come from a private JSON map. Notes are human-owned in Google Sheets and are never imported from CSV or API.",
+      "Discord names come from a private JSON map. Player Notes (Editable) is human-owned on Characters and Professions. Each tab keeps its own notes by character identity; notes are never imported from CSV, config or API.",
     ],
     [
       "Availability",
@@ -218,7 +210,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ["Provider", "https://develop.battle.net/documentation/world-of-warcraft"],
     [
       "Guild rank",
-      "Numeric API rank: 0 is guild master. Custom rank names are not inferred.",
+      "Guild rank labels come from the private guildRankNames mapping. Unmapped ranks are labelled explicitly; the numeric API rank remains in a hidden column. Custom titles are never inferred.",
     ],
     [
       "Talents",
@@ -233,7 +225,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     { name: "Characters", rows: characters },
     { name: "Professions", rows: professions },
     { name: "Guild Info", rows: guild },
-    { name: "Export Notes", rows: reference },
+    { name: "Automated Export Info", rows: reference },
   ];
 }
 
@@ -319,13 +311,19 @@ export function toXlsx(tables: Table[]): Uint8Array {
   );
   add(
     "xl/styles.xml",
-    `<styleSheet xmlns="${ns}"><fonts count="${2 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}</fonts><fills count="${3 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}</fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${2 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
+    `<styleSheet xmlns="${ns}"><fonts count="${2 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}</fonts><fills count="${4 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${3 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}<xf numFmtId="0" fontId="0" fillId="${3 + classStyles.length}" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
   );
   tables.forEach((table, i) => {
     const width = table.rows[0]?.length ?? 1;
     const last = `${column(width - 1)}${Math.max(1, table.rows.length)}`;
     const classColumn = table.rows[0]?.indexOf("Class") ?? -1;
     const frozen = ["Characters", "Professions"].includes(table.name);
+    const shadedRows = new Set<number>();
+    if (table.name === "Professions")
+      for (const group of playerGroups(table.rows)) {
+        if (group.shaded)
+          for (let r = group.start; r < group.end; r++) shadedRows.add(r);
+      }
     const rows = table.rows
       .map(
         (row, r) =>
@@ -335,7 +333,14 @@ export function toXlsx(tables: Table[]): Uint8Array {
                 c === classColumn
                   ? classNames.indexOf(String(cell).trim().toLowerCase())
                   : -1;
-              const style = r === 0 ? 1 : colorIndex < 0 ? 0 : colorIndex + 2;
+              const style =
+                r === 0
+                  ? 1
+                  : c < 2 && shadedRows.has(r)
+                    ? 2 + classStyles.length
+                    : colorIndex < 0
+                      ? 0
+                      : colorIndex + 2;
               return `<c r="${column(c)}${r + 1}" s="${style}" t="${typeof cell === "number" ? "n" : "inlineStr"}">${typeof cell === "number" ? `<v>${cell}</v>` : `<is><t xml:space="preserve">${xml(cell)}</t></is>`}</c>`;
             })
             .join("")}</row>`,

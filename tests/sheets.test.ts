@@ -71,7 +71,9 @@ test("human Notes follow character identity across reordering and cannot be sile
   ];
   const notes = preservedNotes(oldRows, table);
   const body = JSON.stringify(
-    sheetRequests([table], [{ sheetId: 3, title: "Characters" }], notes),
+    sheetRequests([table], [{ sheetId: 3, title: "Characters" }], {
+      Characters: notes,
+    }),
   );
   expect(body).toContain('"stringValue":"Human text"');
   expect(body).not.toContain("addSheet");
@@ -115,7 +117,9 @@ test("Notes follow stable IDs through renames and survive the first slug-to-ID u
   const notes = preservedNotes(oldRows, table);
   expect(
     JSON.stringify(
-      sheetRequests([table], [{ sheetId: 1, title: "Characters" }], notes),
+      sheetRequests([table], [{ sheetId: 1, title: "Characters" }], {
+        Characters: notes,
+      }),
     ),
   ).toContain("Human note");
   const sameSlugTable = buildTables({
@@ -135,11 +139,9 @@ test("Notes follow stable IDs through renames and survive the first slug-to-ID u
   const upgraded = preservedNotes(missingIdRows, sameSlugTable);
   expect(
     JSON.stringify(
-      sheetRequests(
-        [sameSlugTable],
-        [{ sheetId: 1, title: "Characters" }],
-        upgraded,
-      ),
+      sheetRequests([sameSlugTable], [{ sheetId: 1, title: "Characters" }], {
+        Characters: upgraded,
+      }),
     ),
   ).toContain("Human note");
 });
@@ -149,7 +151,13 @@ test("Notes formatting follows identity even for empty cells when rows reorder",
   if (!base) throw new Error("fixture");
   const table = buildTables({
     ...snapshot,
-    rows: [{ ...base, character: { ...base.character, slug: "second" } }, base],
+    rows: [
+      {
+        ...base,
+        character: { ...base.character, slug: "second", name: "AAA Second" },
+      },
+      base,
+    ],
   })[0];
   if (!table) throw new Error("fixture");
   const formats = [
@@ -177,7 +185,7 @@ test("Notes formatting follows identity even for empty cells when rows reorder",
   const requests = sheetRequests(
     [table],
     [{ sheetId: 3, title: "Characters" }],
-    notes,
+    { Characters: notes },
   ) as {
     updateCells?: {
       start?: { columnIndex: number };
@@ -192,7 +200,7 @@ test("Notes formatting follows identity even for empty cells when rows reorder",
     };
   }[];
   const restored = requests.find(
-    (r) => r.updateCells?.start?.columnIndex === 6,
+    (r) => r.updateCells?.start?.columnIndex === 7,
   )?.updateCells;
   expect(restored?.rows.map((r) => r.values[0]?.userEnteredFormat)).toEqual([
     formats[1],
@@ -202,7 +210,7 @@ test("Notes formatting follows identity even for empty cells when rows reorder",
     const range = request.repeatCell?.range;
     if (range?.startRowIndex === 1)
       expect(
-        (range.endColumnIndex ?? 24) <= 6 || (range.startColumnIndex ?? 0) > 6,
+        (range.endColumnIndex ?? 24) <= 7 || (range.startColumnIndex ?? 0) > 7,
       ).toBe(true);
   }
 });
@@ -330,19 +338,19 @@ test("layout migration renames only owned Data Notes in the same batch and prese
   };
   expect(body.requests[0]?.updateSheetProperties?.properties).toEqual({
     sheetId: 6,
-    title: "Export Notes",
+    title: "Automated Export Info",
   });
   const updatedCharacters = body.requests.find(
     (r) => r.updateCells?.range?.sheetId === 3,
   )?.updateCells;
   expect(
-    updatedCharacters?.rows[1]?.values[6]?.userEnteredValue?.stringValue,
+    updatedCharacters?.rows[1]?.values[7]?.userEnteredValue?.stringValue,
   ).toBe("Keep this human note");
   expect(
     body.requests.find(
       (r) =>
         r.updateCells?.start?.sheetId === 3 &&
-        r.updateCells.start.columnIndex === 6,
+        r.updateCells.start.columnIndex === 7,
     )?.updateCells?.rows[0]?.values[0]?.userEnteredFormat,
   ).toEqual(humanFormat);
   expect(JSON.stringify(body)).not.toContain('"sheetId":9');
@@ -377,7 +385,7 @@ test("an unmanaged Data Notes stays untouched, and an Export Notes collision sto
               : {}),
           },
           ...(collision
-            ? [{ properties: { sheetId: 8, title: "Export Notes" } }]
+            ? [{ properties: { sheetId: 8, title: "Automated Export Info" } }]
             : []),
         ],
       });
@@ -444,7 +452,7 @@ test("class formatting preserves names, uses readable text, and hides diagnostic
     r.updateDimensionProperties ? [r.updateDimensionProperties] : [],
   );
   expect(
-    dimensions.find((d) => d.range.startIndex === 6)?.properties.hiddenByUser,
+    dimensions.find((d) => d.range.startIndex === 7)?.properties.hiddenByUser,
   ).toBe(false);
   expect(
     dimensions.find((d) => d.range.startIndex === 8)?.properties.hiddenByUser,
@@ -517,4 +525,306 @@ test("an inline service-account key mints a token and malformed keys never echo 
       http,
     ),
   ).rejects.toThrow("client_email and private_key");
+});
+
+test("both tabs preserve independent player notes and formats by ID through rank sorting and header migration", async () => {
+  const base = snapshot.rows[0];
+  if (!base) throw new Error("fixture");
+  const current = {
+    ...snapshot,
+    rows: [
+      {
+        ...base,
+        character: {
+          ...base.character,
+          id: "2",
+          slug: "second",
+          name: "Second",
+          guildRank: 1,
+        },
+      },
+      { ...base, character: { ...base.character, id: "1", guildRank: 0 } },
+    ],
+  };
+  const tables = buildTables(current);
+  const titles = ["Characters", "Professions"];
+  const owner = [
+    { metadataKey: "wow-forever-guild-report-v1", metadataValue: "managed" },
+  ];
+  const batches: {
+    requests: {
+      updateCells?: {
+        start?: { sheetId: number; columnIndex: number };
+        range?: { sheetId: number };
+        rows: {
+          values: {
+            userEnteredValue?: { stringValue?: string };
+            userEnteredFormat?: unknown;
+          }[];
+        }[];
+      };
+    }[];
+  }[] = [];
+  const format = { textFormat: { bold: true } };
+  const http = new HttpClient(async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith(":batchUpdate")) {
+      batches.push(JSON.parse(String(init?.body)));
+      return Response.json({});
+    }
+    if (!url.searchParams.has("includeGridData"))
+      return Response.json({
+        sheets: titles.map((title, i) => ({
+          properties: { title, sheetId: i + 1 },
+          developerMetadata: owner,
+        })),
+      });
+    const title =
+      url.searchParams.get("ranges") === "'Characters'"
+        ? "Characters"
+        : "Professions";
+    const header = title === "Characters" ? "Notes" : "Player Notes (Editable)";
+    const rows = [
+      {
+        values: ["Region", "Character Slug", "Character ID", header].map(
+          (stringValue) => ({ userEnteredValue: { stringValue } }),
+        ),
+      },
+      ...["2", "1"].map((id) => ({
+        values: [
+          { userEnteredValue: { stringValue: "us" } },
+          {
+            userEnteredValue: {
+              stringValue: id === "1" ? "old-priest" : "second",
+            },
+          },
+          { userEnteredValue: { stringValue: id } },
+          {
+            userEnteredValue: { stringValue: `${title} note ${id}` },
+            userEnteredFormat: format,
+          },
+        ],
+      })),
+    ];
+    return Response.json({ sheets: [{ data: [{ rowData: rows }] }] });
+  });
+  await publishSheets(tables, "example-spreadsheet-id", "test-token", http);
+  expect(batches).toHaveLength(1);
+  for (const [i, title] of titles.entries()) {
+    const cells = batches[0]?.requests.find(
+      (r) => r.updateCells?.range?.sheetId === i + 1,
+    )?.updateCells;
+    const noteColumn =
+      tables[i]?.rows[0]?.indexOf("Player Notes (Editable)") ?? -1;
+    expect(
+      cells?.rows[1]?.values[noteColumn]?.userEnteredValue?.stringValue,
+    ).toBe(`${title} note 1`);
+    expect(
+      cells?.rows[2]?.values[noteColumn]?.userEnteredValue?.stringValue,
+    ).toBe(`${title} note 2`);
+    const styles = batches[0]?.requests.find(
+      (r) =>
+        r.updateCells?.start?.sheetId === i + 1 &&
+        r.updateCells.start.columnIndex === noteColumn,
+    )?.updateCells;
+    expect(styles?.rows[0]?.values[0]?.userEnteredFormat).toEqual(format);
+  }
+});
+
+test("legacy profession rows compact safely, but missing or ambiguous editable columns and departing notes stop writes", async () => {
+  const table = buildTables(snapshot)[1];
+  if (!table) throw new Error("fixture");
+  const legacy = [
+    {
+      values: [
+        "Region",
+        "Character Slug",
+        "Profession",
+        "Category",
+        "Skill",
+        "Maximum",
+      ].map((stringValue) => ({ userEnteredValue: { stringValue } })),
+    },
+  ];
+  expect(preservedNotes(legacy, table).size).toBe(0);
+  const cell = (stringValue: string) => ({ userEnteredValue: { stringValue } });
+  expect(() =>
+    preservedNotes(
+      [
+        {
+          values: ["Region", "Character Slug", "Primary Professions"].map(cell),
+        },
+      ],
+      table,
+    ),
+  ).toThrow("headers");
+  expect(() =>
+    preservedNotes(
+      [
+        {
+          values: [
+            "Region",
+            "Character Slug",
+            "Notes",
+            "Player Notes (Editable)",
+          ].map(cell),
+        },
+      ],
+      table,
+    ),
+  ).toThrow("Ambiguous");
+  let writes = 0;
+  const http = new HttpClient(async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith(":batchUpdate")) {
+      writes++;
+      return Response.json({});
+    }
+    if (!url.searchParams.has("includeGridData"))
+      return Response.json({
+        sheets: [
+          {
+            properties: { sheetId: 2, title: "Professions" },
+            developerMetadata: [
+              {
+                metadataKey: "wow-forever-guild-report-v1",
+                metadataValue: "managed",
+              },
+            ],
+          },
+        ],
+      });
+    return Response.json({
+      sheets: [
+        {
+          data: [
+            {
+              rowData: [
+                {
+                  values: [
+                    "Region",
+                    "Character Slug",
+                    "Player Notes (Editable)",
+                  ].map(cell),
+                },
+                { values: ["us", "departed", "Retain human text"].map(cell) },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  });
+  await expect(
+    publishSheets(
+      buildTables(snapshot),
+      "example-spreadsheet-id",
+      "test-token",
+      http,
+    ),
+  ).rejects.toThrow("departing");
+  expect(writes).toBe(0);
+});
+
+test("owned Export Notes migrates in place; two owned legacy tabs are refused", async () => {
+  for (const duplicate of [false, true]) {
+    let body = "";
+    const owner = [
+      { metadataKey: "wow-forever-guild-report-v1", metadataValue: "managed" },
+    ];
+    const http = new HttpClient(async (input, init) => {
+      if (String(input).includes(":batchUpdate")) {
+        body = String(init?.body);
+        return Response.json({});
+      }
+      return Response.json({
+        sheets: [
+          {
+            properties: { sheetId: 4, title: "Export Notes" },
+            developerMetadata: owner,
+          },
+          ...(duplicate
+            ? [
+                {
+                  properties: { sheetId: 5, title: "Data Notes" },
+                  developerMetadata: owner,
+                },
+              ]
+            : []),
+        ],
+      });
+    });
+    const publish = publishSheets(
+      buildTables(snapshot),
+      "example-spreadsheet-id",
+      "test-token",
+      http,
+    );
+    if (duplicate) {
+      await expect(publish).rejects.toThrow("collision");
+      expect(body).toBe("");
+    } else {
+      await publish;
+      expect(body).toContain('"sheetId":4,"title":"Automated Export Info"');
+    }
+  }
+});
+
+test("slug-only and ID Notes resolving to the same character abort, while conflicting old IDs cannot attach to a reused slug", async () => {
+  const base = snapshot.rows[0];
+  if (!base) throw new Error("fixture");
+  const table = buildTables({
+    ...snapshot,
+    rows: [{ ...base, character: { ...base.character, id: "123" } }],
+  })[0];
+  if (!table) throw new Error("fixture");
+  const cell = (stringValue: string) => ({ userEnteredValue: { stringValue } });
+  const header = {
+    values: ["Region", "Character Slug", "Character ID", "Notes"].map(cell),
+  };
+  const slugRow = {
+    values: ["us", "example-priest", "", "Slug note"].map(cell),
+  };
+  const idRow = {
+    values: ["us", "example-priest", "123", "ID note"].map(cell),
+  };
+  for (const data of [
+    [slugRow, idRow],
+    [idRow, slugRow],
+  ]) {
+    const rows = [header, ...data];
+    expect(() => preservedNotes(rows, table)).toThrow("Duplicate");
+    let writes = 0;
+    const http = new HttpClient(async (input) => {
+      if (String(input).includes(":batchUpdate")) {
+        writes++;
+        return Response.json({});
+      }
+      if (String(input).includes("includeGridData"))
+        return Response.json({ sheets: [{ data: [{ rowData: rows }] }] });
+      return Response.json({
+        sheets: [
+          {
+            properties: { sheetId: 1, title: "Characters" },
+            developerMetadata: [
+              {
+                metadataKey: "wow-forever-guild-report-v1",
+                metadataValue: "managed",
+              },
+            ],
+          },
+        ],
+      });
+    });
+    await expect(
+      publishSheets([table], "example-spreadsheet-id", "test-token", http),
+    ).rejects.toThrow("Duplicate");
+    expect(writes).toBe(0);
+  }
+  const conflicting = {
+    values: ["us", "example-priest", "999", "Old identity note"].map(cell),
+  };
+  expect(() => preservedNotes([header, conflicting], table)).toThrow(
+    "departing",
+  );
 });

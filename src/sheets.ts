@@ -2,7 +2,13 @@ import { createSign } from "node:crypto";
 import { z } from "zod";
 import { readJson } from "./files.ts";
 import { HttpClient, SafeError } from "./http.ts";
-import { classStyle, columnPresentation, rgb } from "./presentation.ts";
+import {
+  classStyle,
+  columnPresentation,
+  isPlayerNotesHeader,
+  playerGroups,
+  rgb,
+} from "./presentation.ts";
 import type { Table } from "./workbook.ts";
 
 const serviceAccountSchema = z.object({
@@ -21,6 +27,9 @@ interface NoteCell {
   userEnteredValue?: SheetValue | undefined;
   userEnteredFormat?: Record<string, unknown> | undefined;
 }
+type NotesByTable = Partial<
+  Record<"Characters" | "Professions", ReadonlyMap<string, NoteCell>>
+>;
 function rowKey(
   row: readonly (string | number)[],
   headers: readonly (string | number)[],
@@ -90,19 +99,36 @@ export function preservedNotes(
     v && "stringValue" in v ? v.stringValue : "";
   const headers =
     rows[0]?.values.map((v) => textValue(v.userEnteredValue)) ?? [];
-  const noteIndex = headers.indexOf("Notes");
+  const noteIndex = headers.findIndex(isPlayerNotesHeader);
   const slugIndex = headers.indexOf("Character Slug");
   const regionIndex = headers.indexOf("Region");
   const idIndex = headers.indexOf("Character ID");
+  // The old long-form Professions tab had no human-owned column.
+  if (
+    noteIndex < 0 &&
+    table.name === "Professions" &&
+    ["Profession", "Category", "Skill", "Maximum"].every((h) =>
+      headers.includes(h),
+    )
+  )
+    return new Map();
+  if (headers.filter(isPlayerNotesHeader).length > 1)
+    throw new SafeError(
+      "Ambiguous player note headers. Resolve duplicate Notes columns before publishing; no changes were made.",
+    );
   if (noteIndex < 0 || slugIndex < 0 || regionIndex < 0)
     throw new SafeError(
-      "Managed Characters headers changed; restore Notes, Region, and Character Slug before publishing.",
+      "Managed player-note headers changed; restore Player Notes (Editable), Region, and Character Slug before publishing.",
     );
   const currentHeader = table.rows[0] ?? [];
-  const currentKeys = new Set(
-    table.rows
-      .slice(1)
-      .flatMap((r) => [rowKey(r, currentHeader), slugKey(r, currentHeader)]),
+  const currentIdentities = new Map(
+    table.rows.slice(1).flatMap((r) => {
+      const identity = rowKey(r, currentHeader);
+      return [
+        [identity, identity],
+        [slugKey(r, currentHeader), identity],
+      ];
+    }),
   );
   const result = new Map<string, NoteCell>();
   for (const row of rows.slice(1)) {
@@ -113,16 +139,19 @@ export function preservedNotes(
     if (!hasContent && !cell?.userEnteredFormat) continue;
     const id = textValue(row.values[idIndex]?.userEnteredValue);
     const key = `${textValue(row.values[regionIndex]?.userEnteredValue)}:${id ? `id:${id}` : textValue(row.values[slugIndex]?.userEnteredValue)}`;
-    if (!currentKeys.has(key) && hasContent)
+    // Canonicalize a slug-only row to its current stable ID before checking
+    // duplicates. An old ID never falls back to a reused slug.
+    const identity = currentIdentities.get(key);
+    if (!identity && hasContent)
       throw new SafeError(
         "A departing or unidentified character has Notes. Archive those notes and clear their cells before publishing; no sheet changes were made.",
       );
-    if (!currentKeys.has(key)) continue;
-    if (result.has(key))
+    if (!identity) continue;
+    if (result.has(identity))
       throw new SafeError(
         "Duplicate character identities have Notes. Resolve duplicates before publishing.",
       );
-    result.set(key, {
+    result.set(identity, {
       userEnteredValue: note ?? { stringValue: "" },
       ...(cell?.userEnteredFormat
         ? { userEnteredFormat: cell.userEnteredFormat }
@@ -196,7 +225,7 @@ export async function googleToken(
 export function sheetRequests(
   tables: Table[],
   existing: { sheetId: number; title: string }[],
-  notes = new Map<string, NoteCell>(),
+  notesByTable: NotesByTable = {},
 ): unknown[] {
   const used = new Set(existing.map((s) => s.sheetId));
   const requests: unknown[] = [];
@@ -208,11 +237,16 @@ export function sheetRequests(
     const frozenColumnCount = ["Characters", "Professions"].includes(title)
       ? 2
       : 0;
-    const noteColumn =
-      title === "Characters" ? (table.rows[0]?.indexOf("Notes") ?? -1) : -1;
+    const noteColumn = ["Characters", "Professions"].includes(title)
+      ? (table.rows[0]?.findIndex(isPlayerNotesHeader) ?? -1)
+      : -1;
+    const notes =
+      title === "Characters" || title === "Professions"
+        ? notesByTable[title]
+        : undefined;
     const noteFor = (row: (string | number)[]) =>
-      notes.get(rowKey(row, table.rows[0] ?? [])) ??
-      notes.get(slugKey(row, table.rows[0] ?? []));
+      notes?.get(rowKey(row, table.rows[0] ?? [])) ??
+      notes?.get(slugKey(row, table.rows[0] ?? []));
     if (id === undefined) {
       id = 10_000;
       while (used.has(id)) id++;
@@ -273,9 +307,7 @@ export function sheetRequests(
         rows: table.rows.map((row, r) => ({
           values: row.map((cell, c) => ({
             userEnteredValue:
-              table.name === "Characters" &&
-              r > 0 &&
-              table.rows[0]?.[c] === "Notes"
+              r > 0 && c === noteColumn
                 ? (noteFor(row)?.userEnteredValue ?? { stringValue: "" })
                 : typeof cell === "number"
                   ? { numberValue: cell }
@@ -314,6 +346,25 @@ export function sheetRequests(
                 },
               },
               fields: "userEnteredFormat",
+            },
+          });
+      if (title === "Professions")
+        for (const group of playerGroups(table.rows))
+          requests.push({
+            repeatCell: {
+              range: {
+                sheetId: id,
+                startRowIndex: group.start,
+                endRowIndex: group.end,
+                startColumnIndex: 0,
+                endColumnIndex: 2,
+              },
+              cell: {
+                userEnteredFormat: {
+                  backgroundColor: rgb(group.shaded ? "F1F5F9" : "FFFFFF"),
+                },
+              },
+              fields: "userEnteredFormat.backgroundColor",
             },
           });
       const classColumn = table.rows[0]?.indexOf("Class") ?? -1;
@@ -451,21 +502,32 @@ export async function publishSheets(
     sheet.developerMetadata.some(
       (m) => m.metadataKey === marker && m.metadataValue === "managed",
     );
-  const legacy = tables.some((table) => table.name === "Export Notes")
-    ? parsed.data.sheets.find(
-        (s) => s.properties.title === "Data Notes" && owned(s),
+  const legacyCandidates = tables.some(
+    (table) => table.name === "Automated Export Info",
+  )
+    ? parsed.data.sheets.filter(
+        (s) =>
+          ["Data Notes", "Export Notes"].includes(s.properties.title) &&
+          owned(s),
       )
-    : undefined;
+    : [];
+  const legacy = legacyCandidates[0];
   if (
-    legacy &&
-    parsed.data.sheets.some((s) => s.properties.title === "Export Notes")
+    legacyCandidates.length > 1 ||
+    (legacy &&
+      parsed.data.sheets.some(
+        (s) => s.properties.title === "Automated Export Info",
+      ))
   )
     throw new SafeError(
-      "Both Data Notes and Export Notes exist. Resolve the tab collision before publishing; no changes were made.",
+      "Automated Export Info migration has a tab collision. Resolve legacy/target tabs before publishing; no changes were made.",
     );
   const existingSheets = parsed.data.sheets.map((s) =>
     s === legacy
-      ? { ...s, properties: { ...s.properties, title: "Export Notes" } }
+      ? {
+          ...s,
+          properties: { ...s.properties, title: "Automated Export Info" },
+        }
       : s,
   );
   for (const table of tables) {
@@ -482,12 +544,17 @@ export async function publishSheets(
         "Target contains an unmanaged roster tab. Use a new spreadsheet; existing human sheets were left alone.",
       );
   }
-  let notes = new Map<string, NoteCell>();
-  if (parsed.data.sheets.some((s) => s.properties.title === "Characters")) {
+  const notes: NotesByTable = {};
+  for (const title of ["Characters", "Professions"] as const) {
+    if (
+      !parsed.data.sheets.some((s) => s.properties.title === title) ||
+      !tables.some((t) => t.name === title)
+    )
+      continue;
     const grid = gridSchema.safeParse(
       await http.json(
         "Google Sheets",
-        `${url}?ranges=${encodeURIComponent("'Characters'")}&includeGridData=true&fields=sheets(data(rowData(values(userEnteredValue,userEnteredFormat))))`,
+        `${url}?ranges=${encodeURIComponent(`'${title}'`)}&includeGridData=true&fields=sheets(data(rowData(values(userEnteredValue,userEnteredFormat))))`,
         { headers },
       ),
     );
@@ -495,9 +562,12 @@ export async function publishSheets(
       throw new SafeError(
         "Cannot safely read existing Notes. No sheet changes were made.",
       );
-    const table = tables.find((t) => t.name === "Characters");
-    if (!table) throw new SafeError("Characters table is missing.");
-    notes = preservedNotes(grid.data.sheets[0]?.data[0]?.rowData ?? [], table);
+    const table = tables.find((t) => t.name === title);
+    if (!table) throw new SafeError("Player note table is missing.");
+    notes[title] = preservedNotes(
+      grid.data.sheets[0]?.data[0]?.rowData ?? [],
+      table,
+    );
   }
   const body = JSON.stringify({
     requests: [
@@ -507,7 +577,7 @@ export async function publishSheets(
               updateSheetProperties: {
                 properties: {
                   sheetId: legacy.properties.sheetId,
-                  title: "Export Notes",
+                  title: "Automated Export Info",
                 },
                 fields: "title",
               },

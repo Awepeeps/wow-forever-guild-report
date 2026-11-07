@@ -43,7 +43,7 @@ test("workbook has adjacent roster/profession tabs, real numeric cells, frozen h
     "Characters",
     "Professions",
     "Guild Info",
-    "Export Notes",
+    "Automated Export Info",
   ]);
   expect(tables[0]?.rows[1]).toContain(snapshot.generatedAt);
   expect(tables[0]?.rows[0]).toContain("Guild Rank");
@@ -101,8 +101,8 @@ test("compact roster keeps skills in Professions and hides technical columns wit
     "Level",
     "Guild Rank",
     "Talent Points",
-    "Notes",
     "API Status",
+    "Player Notes (Editable)",
     "Generated At",
   ]);
   expect(
@@ -113,10 +113,14 @@ test("compact roster keeps skills in Professions and hides technical columns wit
   expect(characters.rows[0]).not.toContain("Profession 1");
   expect(JSON.stringify(characters.rows)).not.toContain("Alchemy");
   expect(
-    professions.rows.some((row) => row.includes("Alchemy") && row.includes(50)),
+    professions.rows.some((row) =>
+      row.some((cell) => String(cell).includes("Alchemy — 50/75")),
+    ),
   ).toBe(true);
   expect(
-    professions.rows.some((row) => row.includes("Cooking") && row.includes(0)),
+    professions.rows.some((row) =>
+      row.some((cell) => String(cell).includes("Cooking — 0/75")),
+    ),
   ).toBe(true);
   expect(
     professions.rows.some(
@@ -135,4 +139,118 @@ test("compact roster keeps skills in Professions and hides technical columns wit
   expect(sheet).toContain('r="C2" s="2"');
   expect(styles).toContain('rgb="FF0070DE"');
   expect(toCsv(characters.rows)).toContain("Character Slug");
+});
+
+test("profession summaries retain every tier, distinguish zero/unknown, and both tabs render rank-first order with explicit labels", () => {
+  const base = snapshot.rows[0];
+  if (!base) throw new Error("fixture");
+  const rows = [
+    {
+      ...base,
+      discord: "Alice",
+      character: {
+        ...base.character,
+        slug: "officer-z",
+        name: "Zed Officer",
+        guildRank: 1,
+      },
+    },
+    {
+      ...base,
+      discord: "Alice",
+      character: {
+        ...base.character,
+        slug: "officer-a",
+        name: "Alpha Officer",
+        guildRank: 1,
+      },
+    },
+    {
+      ...base,
+      discord: "Zebra",
+      character: {
+        ...base.character,
+        slug: "leader",
+        name: "Guild Leader",
+        guildRank: 0,
+        primary: [
+          { name: "Alchemy", tier: "First", skill: 0, max: 75 },
+          { name: "Alchemy", tier: "Second" },
+          { name: "Herbalism", skill: 25 },
+        ],
+        secondary: [
+          { name: "Cooking", skill: 1, max: 75 },
+          { name: "Fishing", skill: 0, max: 75 },
+          { name: "First Aid", max: 75 },
+        ],
+      },
+    },
+    {
+      ...base,
+      discord: "Bob",
+      character: { ...base.character, slug: "unknown", name: "Unknown Rank" },
+    },
+    {
+      ...base,
+      discord: "",
+      character: {
+        ...base.character,
+        slug: "unmapped",
+        name: "Unmapped",
+        guildRank: 1,
+      },
+    },
+    {
+      ...base,
+      discord: "Aardvark",
+      character: {
+        ...base.character,
+        slug: "veteran",
+        name: "Veteran",
+        guildRank: 2,
+      },
+    },
+  ];
+  const tables = buildTables({
+    ...snapshot,
+    guildRankNames: { "0": "Guild Master", "1": "Officer" },
+    rows,
+  });
+  for (const t of tables.slice(0, 2))
+    expect(t.rows.slice(1).map((r) => r[1])).toEqual([
+      "Guild Leader",
+      "Alpha Officer",
+      "Zed Officer",
+      "Unmapped",
+      "Veteran",
+      "Unknown Rank",
+    ]);
+  const chars = tables[0],
+    prof = tables[1];
+  if (!chars || !prof) throw new Error("fixture");
+  expect(chars.rows[1]?.[4]).toBe("Guild Master");
+  expect(chars.rows[2]?.[4]).toBe("Officer");
+  expect(chars.rows[5]?.[4]).toBe("Rank 2 (unmapped)");
+  expect(chars.rows[6]?.[4]).toBe("");
+  expect(
+    chars.rows[1]?.[chars.rows[0]?.indexOf("Guild Rank Number") ?? -1],
+  ).toBe(0);
+  expect(prof.rows).toHaveLength(rows.length + 1);
+  expect(prof.rows[1]?.[3]).toBe(
+    "Alchemy (First) — 0/75\nAlchemy (Second) — ?/?\nHerbalism — 25/?",
+  );
+  expect(prof.rows[1]?.[4]).toBe(
+    "Cooking — 1/75\nFishing — 0/75\nFirst Aid — ?/75",
+  );
+  expect(prof.rows[0]?.slice(0, 7)).toEqual([
+    "Discord",
+    "Character Name",
+    "Class",
+    "Primary Professions",
+    "Secondary Professions",
+    "Profession API Status",
+    "Player Notes (Editable)",
+  ]);
+  // Rendering a previously saved snapshot must not mutate its source order.
+  expect(rows[0]?.character.slug).toBe("officer-z");
 });
