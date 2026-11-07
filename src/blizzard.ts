@@ -167,15 +167,19 @@ export class BlizzardClient {
       const fullName = [c.name, c.surname].filter(Boolean).join(" ");
       if (!c.slug)
         throw new SafeError(
-          "Blizzard guild member is missing its Forever slug; supply explicit characters instead.",
+          "Blizzard guild member is missing its Forever slug. Guild refresh stopped; for an explicit-only roster, remove guild from the config.",
         );
-      return characterSchema.parse({
-        slug: c.slug,
-        name: fullName,
-        ...(c.id === undefined ? {} : { id: String(c.id) }),
-        guildRank: rank,
-        ...(c.level === undefined ? {} : { level: c.level }),
-      });
+      return parseApi(
+        characterSchema,
+        {
+          slug: c.slug,
+          name: fullName,
+          ...(c.id === undefined ? {} : { id: String(c.id) }),
+          guildRank: rank,
+          ...(c.level === undefined ? {} : { level: c.level }),
+        },
+        "guild member",
+      );
     });
   }
 
@@ -240,8 +244,6 @@ export class BlizzardClient {
 export function isFatalApiError(error: unknown): boolean {
   return (
     error instanceof ApiError &&
-    (error.status === 401 ||
-      error.status === 403 ||
-      error.service === "Blizzard OAuth")
+    (error.status === 401 || error.service === "Blizzard OAuth")
   );
 }

@@ -43,7 +43,7 @@ demo:
 import-csv input output=".local/roster.json":
     bun run cli import --input {{quote(input)}} --out {{quote(output)}}
 
-export config=".local/roster.json" out="output/roster":
+export config=".local/roster.json" out="output/export":
     bun run cli export --config {{quote(config)}} --out {{quote(out)}}
 
 refresh config=".local/roster.json" out="output/roster":

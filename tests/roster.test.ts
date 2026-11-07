@@ -32,6 +32,7 @@ describe("guild roster refresh", () => {
               guildRank: 2,
             }),
           ],
+          profile: unavailable,
           professions: unavailable,
           talents: unavailable,
         }),
@@ -47,6 +48,8 @@ describe("guild roster refresh", () => {
       expect(result.rows[0]?.character.talents).toEqual(
         prior.rows[0]?.character.talents,
       );
+      expect(result.rows[0]?.character.class).toBe("Priest");
+      expect(result.rows[0]?.profileFetchedAt).toBe(now.toISOString());
       expect(result.rows[0]?.professionFetchedAt).toBe(now.toISOString());
       expect(result.rows[0]?.talentFetchedAt).toBe(now.toISOString());
       const clear = configSchema.parse({
@@ -147,6 +150,38 @@ describe("guild roster refresh", () => {
     expect(result.rows[0]?.professionFetchedAt).toBe(null);
     const empty = await refreshRoster(guildConfig, {}, source(), now, snapshot);
     expect(empty.rows).toHaveLength(0);
+  });
+  test("character 403 retains the affected component while guild 403 and OAuth 403 abort", async () => {
+    const forbidden = async (): Promise<never> => {
+      throw new ApiError("Blizzard API", 403);
+    };
+    const result = await refreshRoster(
+      config,
+      {},
+      source({ professions: forbidden }),
+      now,
+      snapshot,
+    );
+    expect(result.rows[0]?.character.primary).toEqual(
+      snapshot.rows[0]?.character.primary,
+    );
+    expect(result.rows[0]?.professionStatus).toBe("error");
+    expect(result.rows[0]?.profileStatus).toBe("ok");
+    expect(result.rows[0]?.talentStatus).toBe("ok");
+    await expect(
+      refreshRoster(config, {}, source({ guild: forbidden })),
+    ).rejects.toThrow("HTTP 403");
+    await expect(
+      refreshRoster(
+        config,
+        {},
+        source({
+          profile: async () => {
+            throw new ApiError("Blizzard OAuth", 403);
+          },
+        }),
+      ),
+    ).rejects.toThrow("HTTP 403");
   });
   test("guild and auth failures abort rather than publishing a misleading roster", async () => {
     await expect(

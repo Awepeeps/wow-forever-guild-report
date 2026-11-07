@@ -3,9 +3,14 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { snapshotSchema } from "../src/model.ts";
+import { snapshot } from "./helpers.ts";
 
 const root = resolve(import.meta.dir, "..");
-async function run(directory: string, args: string[]) {
+async function run(
+  directory: string,
+  args: string[],
+  environment: Record<string, string> = {},
+) {
   const proc = Bun.spawn(
     [
       join(root, "node_modules/.bin/varlock"),
@@ -25,6 +30,7 @@ async function run(directory: string, args: string[]) {
         GOOGLE_SERVICE_ACCOUNT_FILE: "",
         GOOGLE_SPREADSHEET_ID: "",
         DISCORD_MAP_FILE: "",
+        ...environment,
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -70,6 +76,56 @@ test("real Varlock CLI exports a private workbook and fails refresh before touch
     expect(failed.code).toBe(1);
     expect(failed.stderr).toContain("BLIZZARD_CLIENT_ID");
     expect(await readFile(path, "utf8")).toBe(before);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("offline export defaults to a separate directory and refuses replacing an API snapshot", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "roster-export-"));
+  try {
+    await Bun.write(
+      join(directory, ".env.schema"),
+      Bun.file(join(root, ".env.schema")),
+    );
+    const livePath = join(directory, "output/roster/snapshot.json");
+    const live = JSON.stringify({
+      ...snapshot,
+      rows: snapshot.rows.map((row) => ({ ...row, profileStatus: "ok" })),
+    });
+    await Bun.write(livePath, live);
+    const args = ["export", "--config", join(root, "examples/roster.json")];
+    expect((await run(directory, args)).code).toBe(0);
+    expect(await readFile(livePath, "utf8")).toBe(live);
+    expect(
+      await Bun.file(join(directory, "output/export/roster.xlsx")).exists(),
+    ).toBe(true);
+    const refused = await run(directory, [...args, "--out", "output/roster"]);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("cannot replace an API refresh snapshot");
+    expect(await readFile(livePath, "utf8")).toBe(live);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("a missing configured Discord map fails before writing exports", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "roster-map-"));
+  try {
+    await Bun.write(
+      join(directory, ".env.schema"),
+      Bun.file(join(root, ".env.schema")),
+    );
+    const result = await run(
+      directory,
+      ["export", "--config", join(root, "examples/roster.json")],
+      { DISCORD_MAP_FILE: ".local/missing-map.json" },
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Cannot read JSON input");
+    expect(
+      await Bun.file(join(directory, "output/export/snapshot.json")).exists(),
+    ).toBe(false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

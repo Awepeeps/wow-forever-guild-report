@@ -26,7 +26,7 @@ Open `output/demo/roster.xlsx` in Excel, LibreOffice, or Google Sheets. It has f
 | Professions    | One row per character/profession/tier, including all secondaries and skill/max                                                  |
 | Reference Info | Interpretation, source links, API limitations                                                                                   |
 
-Each export also includes four CSV files and `snapshot.json`. Characters sort by **Discord name, then character name, with unmapped characters last**; ties use the API slug. Names compare in English with case-insensitive grouping and deterministic case ties. API return order does not affect the workbook.
+Each export also includes four CSV files and `snapshot.json`. Offline `just export` defaults to `output/export/`; API `just refresh` defaults to `output/roster/`. Offline export refuses to replace a snapshot containing API statuses, even with an explicit output path. Characters sort by **Discord name, then character name, with unmapped characters last**; ties use the API slug. Names compare in English with case-insensitive grouping and deterministic case ties. API return order does not affect the workbook.
 
 ## Configure your guild
 
@@ -72,14 +72,14 @@ Private Discord mapping format:
 }
 ```
 
-Keys are region plus the lowercase API-provided character slug; an optional `region:id:characterID` mapping takes precedence and survives character renames. Values are strings (Discord handles, display names, or snowflake IDs). Multiple characters can map to one Discord name. Unmapped members remain in the roster with an empty Discord cell. No automatic Discord identity matching is attempted.
+Keys are region plus the lowercase API-provided character slug; an optional `region:id:characterID` mapping takes precedence and survives character renames. Values are strings (Discord handles, display names, or snowflake IDs). Multiple characters can map to one Discord name. Unmapped members remain in the roster with an empty Discord cell. An unset `DISCORD_MAP_FILE` permits an unmapped roster; a configured missing or invalid file stops the command before writing. No automatic Discord identity matching is attempted.
 
 ```sh
 just env-check   # Varlock validates the configuration; secret values are redacted
 just refresh     # .local/roster.json -> output/roster/
 ```
 
-Each refresh discovers the guild anew and fetches profile, professions, and specializations for every member, with four workers and bounded retries/timeouts. It reuses the previous output snapshot to retain known values when an individual endpoint fails. Omitted fields in explicit character overrides retain prior values; an explicit empty array intentionally clears that supplied baseline. A failed guild lookup or OAuth error stops before writing exports. Departed members disappear from the new roster; explicit `characters` remain included. Do not run two refreshes into the same output directory concurrently.
+Each refresh discovers the guild anew and fetches profile, professions, and specializations for every member, with four workers and bounded retries/timeouts. It reuses the previous output snapshot to retain known values when an individual endpoint fails, including a character-specific 403. Omitted fields in explicit character overrides retain prior values; an explicit empty array intentionally clears that supplied baseline. A failed guild lookup, OAuth error, or API 401 stops before writing exports. Departed members disappear from the new roster; explicit `characters` remain included. Do not run two refreshes into the same output directory concurrently.
 
 Exit codes: **0** complete, **2** partial API data exported, **1** failed (no new snapshot). Review the per-component status and Sync Notes before publishing partial results. A shell chain with `&&` intentionally does not auto-publish an exit-2 refresh.
 

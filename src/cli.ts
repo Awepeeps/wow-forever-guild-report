@@ -131,10 +131,24 @@ async function main(): Promise<void> {
     configSchema,
   );
   const mapPath = process.env.DISCORD_MAP_FILE;
-  const map =
-    mapPath && (await Bun.file(mapPath).exists())
-      ? await readJson(mapPath, discordMapSchema)
-      : {};
+  const map = mapPath ? await readJson(mapPath, discordMapSchema) : {};
+  const outputDirectory =
+    values.out ?? (command === "export" ? "output/export" : "output/roster");
+  const previousPath = join(outputDirectory, "snapshot.json");
+  const previous = (await Bun.file(previousPath).exists())
+    ? await readJson(previousPath, snapshotSchema)
+    : undefined;
+  if (
+    command === "export" &&
+    previous?.rows.some((row) =>
+      [row.profileStatus, row.professionStatus, row.talentStatus].some(
+        (status) => status !== "manual",
+      ),
+    )
+  )
+    throw new SafeError(
+      "Offline export cannot replace an API refresh snapshot. Choose a separate output directory.",
+    );
   let snapshot = manualSnapshot(config, map);
   if (command === "refresh") {
     const clientId = process.env.BLIZZARD_CLIENT_ID;
@@ -143,10 +157,6 @@ async function main(): Promise<void> {
       throw new SafeError(
         "Refresh requires BLIZZARD_CLIENT_ID and BLIZZARD_CLIENT_SECRET in Varlock configuration.",
       );
-    const previousPath = join(values.out ?? "output/roster", "snapshot.json");
-    const previous = (await Bun.file(previousPath).exists())
-      ? await readJson(previousPath, snapshotSchema)
-      : undefined;
     snapshot = await refreshRoster(
       config,
       map,
@@ -155,7 +165,7 @@ async function main(): Promise<void> {
       previous,
     );
   }
-  await writeExports(snapshot, values.out ?? "output/roster");
+  await writeExports(snapshot, outputDirectory);
   const incomplete = snapshot.rows.filter((r) =>
     [r.profileStatus, r.professionStatus, r.talentStatus].some(
       (s) => s === "unavailable" || s === "error",

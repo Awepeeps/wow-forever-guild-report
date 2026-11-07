@@ -33,12 +33,9 @@ test("caps retry budget and suppresses sensitive server bodies", async () => {
     "HTTP 503",
   );
   expect(attempts).toBe(4);
-  try {
-    await client.json("API", "https://example.com", {}, false);
-  } catch (e) {
-    expect(e).toBeInstanceOf(ApiError);
-    expect(String(e)).not.toContain("sensitive-example-body");
-  }
+  await expect(
+    client.json("API", "https://example.com", {}, false),
+  ).rejects.toEqual(new ApiError("API", 503));
   expect(attempts).toBe(5);
 });
 
