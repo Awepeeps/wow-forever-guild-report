@@ -136,7 +136,7 @@ See [Infisical migration](docs/infisical.md) for moving the same config contract
 
 ## Engineering checks
 
-`just check` runs Biome lint/format checks, strict TypeScript, Bun behavior tests, high-severity dependency auditing, a publication path guard, and Gitleaks against Git history and working files. Run `just hooks` to opt into the repo's secret-checking pre-commit hook (this sets local `core.hooksPath`). CI runs the same recipes plus the offline demo and Varlock validation on PRs/main; no live secrets or guild exports enter CI or uploaded artifacts. Actions are pinned by commit, dependencies by exact version/lockfile; Dependabot checks updates weekly.
+`just check` runs Biome lint/format checks, strict TypeScript, Bun behavior tests, high-severity dependency auditing, a publication path guard, and Gitleaks against Git history and working files. Run `just hooks` to opt into the repo's secret-checking pre-commit hook (this sets local `core.hooksPath`). CI runs the same recipes plus the offline demo and Varlock validation on PRs and branch pushes; no live secrets or guild exports enter CI or uploaded artifacts. Actions are pinned by commit, dependencies by exact version/lockfile; Dependabot checks updates weekly.
 
 There is no deployment service to run. For automation, schedule `just refresh` locally or on a trusted runner; add `just sheets` only when publishing is desired. Keep secrets on that machine/secret provider and handle exit code 2 explicitly. Do not place private roster artifacts in public CI logs/artifacts.
 
