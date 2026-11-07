@@ -93,7 +93,7 @@ Talents display actual points such as `Shadow Magic 5, Discipline 2`. They come 
 
 Guild Rank is the **numeric API rank**, with 0 for guild master; custom rank titles are not guessed. Profession tiers are retained individually. Skill `0` is distinct from unknown (blank/`unknown`). All returned secondary professions are included, such as Cooking, Fishing, and First Aid where supported.
 
-Guild Info and Characters show **Generated At** in UTC. **Fetched At** is the refresh attempt time; per-component **Last Success** columns indicate when retained data was last retrieved successfully. These timestamps describe this tool's fetches, not Blizzard's underlying update time. Blizzard profiles can lag until logout. Failed requests retain prior values, with failure status and the prior last-success timestamp.
+Guild Info shows **Generated At** in UTC; repeated generation times on Characters and Professions are hidden by default. **Fetched At** is the refresh attempt time; per-component **Last Success** columns indicate when retained data was last retrieved successfully. These timestamps describe this tool's fetches, not Blizzard's underlying update time. Blizzard profiles can lag until logout. Failed requests retain prior values, with failure status and the prior last-success timestamp.
 
 ## Publish to Google Sheets
 
@@ -112,7 +112,9 @@ The tool creates Characters, Professions, Guild Info, and Export Notes with owne
 
 **Notes belongs to humans.** CSV/API imports never read Notes, and local exports leave that column blank. In managed Google Sheets, existing Notes cell values are carried by region + character identity when rows reorder. If a departing/unidentified character has Notes, publishing stops before changing the sheet; archive the note elsewhere and clear the old cell before retrying. Avoid editing Notes during publishing: the Sheets API has no compare-and-swap for concurrent cell edits. Keep long-term freeform notes in a separate human-owned tab if you need independent editing.
 
-Notes cell values and cell formatting are preserved by identity, including when the column moves. Other generated formatting, dimensions, filters, and cells are tool-owned. Service account tokens are minted in memory; private keys and access tokens are never placed in workbook output. A failed write is not retried automatically because the outcome may be ambiguous.
+Notes cell values and cell formatting are preserved by identity, including when the column moves. Duplicate identities with Notes content or formatting stop publication until the duplicate rows are resolved. Other generated formatting, dimensions, filters, and cells are tool-owned. Service account tokens are minted in memory; private keys and access tokens are never placed in workbook output. A failed write is not retried automatically because the outcome may be ambiguous.
+
+The Export Notes rename also changes the generated CSV filename from `data-notes.csv` to `export-notes.csv`; update scripts using the old name. Sheets requests exceeding 8 MB stop before writing; very large rosters or extensive Notes formatting may require using the XLSX export instead.
 
 ## Import the existing roster
 
