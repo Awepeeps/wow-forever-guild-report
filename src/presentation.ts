@@ -65,7 +65,7 @@ export function columnPresentation(
     Discord: 130,
     "Character Name": 170,
     Class: 100,
-    Level: 55,
+    Level: 75,
     "Guild Rank": 70,
     "Talent Points": 190,
     Notes: 200,
