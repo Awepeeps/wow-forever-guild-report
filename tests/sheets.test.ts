@@ -828,3 +828,105 @@ test("slug-only and ID Notes resolving to the same character abort, while confli
     "departing",
   );
 });
+
+test("one atomic upgrade handles legacy Characters notes and repeated long-form profession rows together", async () => {
+  const owner = [
+    { metadataKey: "wow-forever-guild-report-v1", metadataValue: "managed" },
+  ];
+  const cell = (stringValue: string) => ({ userEnteredValue: { stringValue } });
+  let batch:
+    | {
+        requests: {
+          updateCells?: {
+            range?: { sheetId: number };
+            rows: {
+              values: { userEnteredValue?: { stringValue?: string } }[];
+            }[];
+          };
+          updateSheetProperties?: {
+            properties: { sheetId: number; title?: string };
+          };
+        }[];
+      }
+    | undefined;
+  let writes = 0;
+  const http = new HttpClient(async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith(":batchUpdate")) {
+      writes++;
+      batch = JSON.parse(String(init?.body));
+      return Response.json({});
+    }
+    if (!url.searchParams.has("includeGridData"))
+      return Response.json({
+        sheets: ["Characters", "Professions", "Export Notes"].map(
+          (title, i) => ({
+            properties: { sheetId: i + 1, title },
+            developerMetadata: owner,
+          }),
+        ),
+      });
+    const rows =
+      url.searchParams.get("ranges") === "'Characters'"
+        ? [
+            { values: ["Region", "Character Slug", "Notes"].map(cell) },
+            {
+              values: ["us", "example-priest", "Preserve legacy text"].map(
+                cell,
+              ),
+            },
+          ]
+        : [
+            {
+              values: [
+                "Region",
+                "Character Slug",
+                "Profession",
+                "Category",
+                "Skill",
+                "Maximum",
+              ].map(cell),
+            },
+            {
+              values: [
+                "us",
+                "example-priest",
+                "Alchemy",
+                "Primary",
+                "50",
+                "75",
+              ].map(cell),
+            },
+            {
+              values: [
+                "us",
+                "example-priest",
+                "Cooking",
+                "Secondary",
+                "20",
+                "75",
+              ].map(cell),
+            },
+          ];
+    return Response.json({ sheets: [{ data: [{ rowData: rows }] }] });
+  });
+  await publishSheets(
+    buildTables(snapshot),
+    "example-spreadsheet-id",
+    "test-token",
+    http,
+  );
+  expect(writes).toBe(1);
+  expect(batch?.requests[0]?.updateSheetProperties?.properties).toEqual({
+    sheetId: 3,
+    title: "Automated Export Info",
+  });
+  expect(
+    batch?.requests.find((r) => r.updateCells?.range?.sheetId === 1)
+      ?.updateCells?.rows[1]?.values[7]?.userEnteredValue?.stringValue,
+  ).toBe("Preserve legacy text");
+  expect(
+    batch?.requests.find((r) => r.updateCells?.range?.sheetId === 2)
+      ?.updateCells?.rows,
+  ).toHaveLength(2);
+});

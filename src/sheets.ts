@@ -112,6 +112,10 @@ export function preservedNotes(
     )
   )
     return new Map();
+  if (noteIndex < 0 && table.name === "Professions")
+    throw new SafeError(
+      "Unrecognized Professions headers. Restore the legacy Profession/Category/Skill/Maximum layout or the current Player Notes (Editable) column before publishing; no changes were made.",
+    );
   if (headers.filter(isPlayerNotesHeader).length > 1)
     throw new SafeError(
       "Ambiguous player note headers. Resolve duplicate Notes columns before publishing; no changes were made.",
@@ -349,7 +353,7 @@ export function sheetRequests(
             },
           });
       if (title === "Professions")
-        for (const group of playerGroups(table.rows))
+        for (const group of playerGroups(table.rows).filter((g) => g.shaded))
           requests.push({
             repeatCell: {
               range: {
@@ -361,7 +365,7 @@ export function sheetRequests(
               },
               cell: {
                 userEnteredFormat: {
-                  backgroundColor: rgb(group.shaded ? "F1F5F9" : "FFFFFF"),
+                  backgroundColor: rgb("F1F5F9"),
                 },
               },
               fields: "userEnteredFormat.backgroundColor",

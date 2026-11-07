@@ -265,6 +265,26 @@ function column(index: number): string {
   return result;
 }
 
+function professionRowHeight(table: Table, row: Cell[]): number {
+  const lines = row.map((cell, c) => {
+    const presentation = columnPresentation(
+      table.name,
+      String(table.rows[0]?.[c] ?? ""),
+    );
+    if (presentation.hidden) return 0;
+    // Allow for padding and wrapped text as well as explicit line breaks.
+    const capacity = Math.max(1, Math.floor((presentation.width - 12) / 8));
+    return String(cell)
+      .split(/\r\n|\r|\n/)
+      .reduce(
+        (count, line) =>
+          count + Math.max(1, Math.ceil(Array.from(line).length / capacity)),
+        0,
+      );
+  });
+  return Math.min(409, Math.max(18, Math.max(...lines, 1) * 15 + 3));
+}
+
 // A small OOXML writer: inline strings avoid formulas and external links entirely.
 export function toXlsx(tables: Table[]): Uint8Array {
   const classNames = [
@@ -327,7 +347,7 @@ export function toXlsx(tables: Table[]): Uint8Array {
     const rows = table.rows
       .map(
         (row, r) =>
-          `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : ""}>${row
+          `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : table.name === "Professions" ? ` ht="${professionRowHeight(table, row)}" customHeight="1"` : ""}>${row
             .map((cell, c) => {
               const colorIndex =
                 c === classColumn

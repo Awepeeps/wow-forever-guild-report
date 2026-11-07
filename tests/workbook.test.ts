@@ -254,3 +254,49 @@ test("profession summaries retain every tier, distinguish zero/unknown, and both
   // Rendering a previously saved snapshot must not mutate its source order.
   expect(rows[0]?.character.slug).toBe("officer-z");
 });
+
+test("XLSX profession rows expose multiple lines on open and cap oversized heights", () => {
+  const bytes = toXlsx([
+    {
+      name: "Professions",
+      rows: [
+        [
+          "Discord",
+          "Character Name",
+          "Class",
+          "Primary Professions",
+          "Secondary Professions",
+          "Profession API Status",
+          "Player Notes (Editable)",
+        ],
+        [
+          "player",
+          "Example",
+          "Priest",
+          "Alchemy — 0/75\nHerbalism — ?/?",
+          "Cooking — 1/75\nFishing — 0/75\nFirst Aid — ?/75",
+          "Complete",
+          "",
+        ],
+        [
+          "player",
+          "Example",
+          "Priest",
+          "Long profession ".repeat(500),
+          "",
+          "Complete",
+          "",
+        ],
+      ],
+    },
+  ]);
+  const files = unzipSync(bytes);
+  const sheet = strFromU8(
+    files["xl/worksheets/sheet1.xml"] ?? new Uint8Array(),
+  );
+  const height = Number(
+    sheet.match(/<row r="2" ht="(\d+)" customHeight="1">/)?.[1],
+  );
+  expect(height).toBeGreaterThanOrEqual(45);
+  expect(sheet).toContain('<row r="3" ht="409" customHeight="1">');
+});
