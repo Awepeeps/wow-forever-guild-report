@@ -2,8 +2,10 @@ import { isFatalApiError } from "./blizzard.ts";
 import { ApiError, mapConcurrent, SafeError } from "./http.ts";
 import {
   type Character,
+  characterIdentity,
   characterSchema,
   discordFor,
+  duplicateCharacterIndices,
   type RosterConfig,
   type RosterRow,
   type Snapshot,
@@ -16,6 +18,8 @@ export interface RosterSource {
   professions(slug: string): Promise<Pick<Character, "primary" | "secondary">>;
   talents(slug: string): Promise<Pick<Character, "talents">>;
 }
+
+class IdentityConflictError extends SafeError {}
 
 export async function refreshRoster(
   config: RosterConfig,
@@ -32,25 +36,54 @@ export async function refreshRoster(
     throw new SafeError(
       "Previous snapshot belongs to a different guild or region. Choose a new output directory.",
     );
-  const prior = new Map(
-    previous?.rows.map((r) => [
-      r.character.slug.toLocaleLowerCase("en-US"),
-      r.character,
-    ]),
-  );
+  if (
+    previous &&
+    duplicateCharacterIndices(previous.rows.map((r) => r.character)).length
+  )
+    throw new SafeError(
+      "Previous snapshot contains duplicate character identities.",
+    );
   const priorRows = new Map(
+    previous?.rows.map((r) => [characterIdentity(r.character), r]),
+  );
+  const priorSlugs = new Map(
     previous?.rows.map((r) => [r.character.slug.toLocaleLowerCase("en-US"), r]),
   );
+  const priorFor = (
+    character: Pick<Character, "slug" | "id">,
+  ): RosterRow | undefined => {
+    const stable = character.id
+      ? priorRows.get(characterIdentity(character))
+      : undefined;
+    if (stable) return stable;
+    const bySlug = priorSlugs.get(character.slug.toLocaleLowerCase("en-US"));
+    // Slug fallback is safe only when at least one side has no stable ID.
+    return bySlug && (!character.id || !bySlug.character.id)
+      ? bySlug
+      : undefined;
+  };
   const characters = new Map<string, Character>();
   // A guild roster failure aborts the run; never silently replace it with an empty roster.
-  for (const c of config.guild ? await source.guild(config.guild) : []) {
-    const old = prior.get(c.slug.toLocaleLowerCase("en-US"));
+  const members = config.guild ? await source.guild(config.guild) : [];
+  if (duplicateCharacterIndices(members).length)
+    throw new SafeError(
+      "Guild roster contains duplicate character identities.",
+    );
+  const memberIds = new Map(
+    members
+      .filter((c) => c.id)
+      .map((c) => [c.id, c.slug.toLocaleLowerCase("en-US")]),
+  );
+  for (const c of members) {
+    const old = priorFor(c)?.character;
     characters.set(
       c.slug.toLocaleLowerCase("en-US"),
       old
         ? {
             ...old,
+            slug: c.slug,
             name: c.name,
+            ...(c.id === undefined ? {} : { id: c.id }),
             ...(c.level === undefined ? {} : { level: c.level }),
             ...(c.guildRank === undefined ? {} : { guildRank: c.guildRank }),
           }
@@ -58,24 +91,38 @@ export async function refreshRoster(
     );
   }
   for (const c of config.characters) {
-    const key = c.slug.toLocaleLowerCase("en-US");
+    const key =
+      (c.id ? memberIds.get(c.id) : undefined) ??
+      c.slug.toLocaleLowerCase("en-US");
+    const member = characters.get(key);
+    if (member?.id && c.id && member.id !== c.id)
+      throw new SafeError(
+        "Explicit character ID conflicts with guild discovery. Reconcile the private config before refreshing.",
+      );
     characters.set(
       key,
       characterSchema.parse({
-        ...prior.get(key),
-        ...characters.get(key),
+        // Guild discovery has already selected a safe baseline using its ID.
+        // A config entry without an ID must not reopen slug-based history.
+        ...(member ?? priorFor(c)?.character),
         ...c,
+        slug: member?.slug ?? c.slug,
       }),
     );
   }
   if (characters.size > 2_000)
     throw new SafeError("Combined roster exceeds 2,000 characters.");
+  if (duplicateCharacterIndices([...characters.values()]).length)
+    throw new SafeError(
+      "Combined roster contains duplicate character identities.",
+    );
   const fetchedAt = now.toISOString();
   const rows = await mapConcurrent(
     [...characters.values()],
     4,
     async (original): Promise<RosterRow> => {
       let character = original;
+      const prior = priorFor(original);
       const row: RosterRow = {
         character,
         discord: discordFor(map, config.region, original.slug, original.id),
@@ -83,27 +130,31 @@ export async function refreshRoster(
         professionStatus: "ok",
         talentStatus: "ok",
         fetchedAt,
-        profileFetchedAt:
-          priorRows.get(original.slug.toLocaleLowerCase("en-US"))
-            ?.profileFetchedAt ?? null,
-        professionFetchedAt:
-          priorRows.get(original.slug.toLocaleLowerCase("en-US"))
-            ?.professionFetchedAt ?? null,
-        talentFetchedAt:
-          priorRows.get(original.slug.toLocaleLowerCase("en-US"))
-            ?.talentFetchedAt ?? null,
+        profileFetchedAt: prior?.profileFetchedAt ?? null,
+        professionFetchedAt: prior?.professionFetchedAt ?? null,
+        talentFetchedAt: prior?.talentFetchedAt ?? null,
         issue: "",
       };
       for (const component of ["profile", "professions", "talents"] as const) {
         try {
           const update = await source[component](original.slug);
+          if (
+            "id" in update &&
+            update.id &&
+            character.id &&
+            update.id !== character.id
+          )
+            throw new IdentityConflictError(
+              "Character ID changed during enrichment. Refresh stopped to prevent mixing identities.",
+            );
           character = characterSchema.parse({ ...character, ...update });
           if (component === "profile") row.profileFetchedAt = fetchedAt;
           else if (component === "professions")
             row.professionFetchedAt = fetchedAt;
           else row.talentFetchedAt = fetchedAt;
         } catch (error) {
-          if (isFatalApiError(error)) throw error;
+          if (error instanceof IdentityConflictError || isFatalApiError(error))
+            throw error;
           const status =
             error instanceof ApiError && error.status === 404
               ? "unavailable"
@@ -128,6 +179,10 @@ export async function refreshRoster(
       return row;
     },
   );
+  if (duplicateCharacterIndices(rows.map((row) => row.character)).length)
+    throw new SafeError(
+      "Enriched roster contains duplicate character identities.",
+    );
   sortRows(rows);
   return {
     version: 1,

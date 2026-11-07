@@ -83,6 +83,8 @@ Each refresh discovers the guild anew and fetches profile, professions, and spec
 
 Exit codes: **0** complete, **2** partial API data exported, **1** failed (no new snapshot). Review the per-component status and Sync Notes before publishing partial results. A shell chain with `&&` intentionally does not auto-publish an exit-2 refresh.
 
+Retention matches stable character IDs across renames. Slug fallback is used only when at least one side lacks an ID; conflicting IDs never share history or last-success timestamps. Guild discovery supplies the current ID and slug. Duplicate IDs/slugs or an ID conflict during enrichment stop the refresh before writing, so a reused name cannot inherit another character's data. Prefer ID-based Discord mappings when available.
+
 ## Talents, ranks, and freshness
 
 Talents display actual points such as `Shadow Magic 5, Discipline 2`. They come from `spent_points` in active specialization groups, never from a guessed role, talent count, or summed talent ranks. Multiple active groups are labelled separately and never summed together. A known empty group means no allocated points; an unsupported response is flagged rather than treated as zero. Inactive builds are not shown.
@@ -128,7 +130,7 @@ The importer derives candidate slugs from full names; check them against the act
 
 ## Configuration and secret management
 
-`.env.schema` is the public contract; `.env.local` holds local values. Bun's automatic dotenv loading is disabled in `bunfig.toml`. Every CLI recipe launches through **`varlock run`**, and the entry point imports `varlock/auto-load` for runtime redaction. Keep real data in `.local/` and `output/`, both ignored. New files are written with mode 0600 and atomic rename; protect existing parent directories and backups too.
+`.env.schema` is the public contract; `.env.local` holds local values. Bun's automatic dotenv loading is disabled in `bunfig.toml`. Every CLI recipe launches through **`varlock run`**, and the entry point imports `varlock/auto-load` for runtime redaction. The demo explicitly selects the synthetic Discord map. Keep real data in `.local/` and `output/`, both ignored. Private Discord-map and service-account filenames are also ignored and rejected by the publication guard outside the explicit synthetic example allowlist. New files are written with mode 0600 and atomic rename; protect existing parent directories and backups too.
 
 Blizzard and Google secrets are optional in the shared schema so offline exports/checks work without credentials. Commands validate their own required credentials. `just env-check` validates supplied values; it is not a live authentication test. Do not use Varlock reveal/export commands in captured logs.
 

@@ -106,6 +106,8 @@ function normalizeProfessions(
   });
 }
 
+class BlizzardAuthError extends SafeError {}
+
 export class BlizzardClient {
   private token: { value: string; expires: number } | undefined;
   private pendingToken: Promise<string> | undefined;
@@ -138,7 +140,11 @@ export class BlizzardClient {
         expires: Date.now() + token.expires_in * 1_000,
       };
       return token.access_token;
-    })();
+    })().catch(() => {
+      throw new BlizzardAuthError(
+        "Blizzard OAuth authentication failed. Check credentials and connectivity; no exports were written.",
+      );
+    });
     try {
       return await this.pendingToken;
     } finally {
@@ -243,7 +249,8 @@ export class BlizzardClient {
 
 export function isFatalApiError(error: unknown): boolean {
   return (
-    error instanceof ApiError &&
-    (error.status === 401 || error.service === "Blizzard OAuth")
+    error instanceof BlizzardAuthError ||
+    (error instanceof ApiError &&
+      (error.status === 401 || error.service === "Blizzard OAuth"))
   );
 }

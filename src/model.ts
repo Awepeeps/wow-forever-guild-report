@@ -51,6 +51,30 @@ export const characterSchema = z
   })
   .strict();
 export type Character = z.infer<typeof characterSchema>;
+type Identity = { slug: string; id?: string | undefined };
+
+export function characterIdentity(character: Identity): string {
+  return character.id
+    ? `id:${character.id}`
+    : `slug:${character.slug.toLocaleLowerCase("en-US")}`;
+}
+
+// Repeated IDs alias one character; repeated slugs alias one API request path.
+export function duplicateCharacterIndices(
+  characters: readonly Identity[],
+): number[] {
+  const identities = new Set<string>();
+  const slugs = new Set<string>();
+  const duplicates: number[] = [];
+  for (const [index, character] of characters.entries()) {
+    const identity = characterIdentity(character);
+    const slug = character.slug.toLocaleLowerCase("en-US");
+    if (identities.has(identity) || slugs.has(slug)) duplicates.push(index);
+    identities.add(identity);
+    slugs.add(slug);
+  }
+  return duplicates;
+}
 // Config entries are overrides. Omission must survive parsing so it cannot clear
 // last-good API data before a later request fails. Explicit [] still clears.
 const characterOverrideSchema = characterSchema.extend({
@@ -88,16 +112,12 @@ export const configSchema = z
   })
   .strict()
   .superRefine((c, ctx) => {
-    const seen = new Set<string>();
-    for (const [i, character] of c.characters.entries()) {
-      const key = character.slug.toLocaleLowerCase("en-US");
-      if (seen.has(key))
-        ctx.addIssue({
-          code: "custom",
-          path: ["characters", i, "slug"],
-          message: "Duplicate character identity",
-        });
-      seen.add(key);
+    for (const i of duplicateCharacterIndices(c.characters)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["characters", i, "slug"],
+        message: "Duplicate character identity",
+      });
     }
   });
 export type RosterConfig = z.infer<typeof configSchema>;
@@ -125,7 +145,17 @@ export const snapshotSchema = z
     guild: z.string().nullable(),
     rows: z.array(rowSchema).max(2_000),
   })
-  .strict();
+  .strict()
+  .superRefine((snapshot, ctx) => {
+    for (const i of duplicateCharacterIndices(
+      snapshot.rows.map((row) => row.character),
+    ))
+      ctx.addIssue({
+        code: "custom",
+        path: ["rows", i, "character"],
+        message: "Duplicate character identity",
+      });
+  });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export const discordMapSchema = z.record(z.string(), text);
 

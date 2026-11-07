@@ -10,6 +10,12 @@ test("publication guard blocks forcibly tracked secrets/data even when scanner e
     "output/snapshot.json",
     "client.key",
     "google-credentials.json",
+    "discord-map.json",
+    "private/discord-map-backup.json",
+    "google-service-account.json",
+    "service-account.json",
+    "private/service_account_key.json",
+    "examples/private-discord-map.json",
   ])
     expect(privatePath(path)).toBe(true);
   for (const path of [

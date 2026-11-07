@@ -11,4 +11,9 @@ dist/
 *.pem
 *.key
 *credentials*.json
+*discord-map*.json
+*discord_map*.json
+*service-account*.json
+*service_account*.json
+!examples/discord-map.json
 !.github/

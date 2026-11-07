@@ -38,7 +38,7 @@ env-check:
     bun x --no-install varlock load
 
 demo:
-    bun run cli export --config examples/roster.json --out output/demo
+    DISCORD_MAP_FILE=examples/discord-map.json bun run cli export --config examples/roster.json --out output/demo
 
 import-csv input output=".local/roster.json":
     bun run cli import --input {{quote(input)}} --out {{quote(output)}}

@@ -4,7 +4,9 @@ export function privatePath(path: string): boolean {
     (/(^|\/)\.env(?:\..*)?$/.test(path) &&
       !/(^|\/)\.env\.(schema|example)$/.test(path)) ||
     /\.(pem|key)$/.test(path) ||
-    /credentials[^/]*\.json$/i.test(path)
+    /credentials[^/]*\.json$/i.test(path) ||
+    (/(^|\/)[^/]*(discord[-_]map|service[-_]account)[^/]*\.json$/i.test(path) &&
+      path !== "examples/discord-map.json")
   );
 }
 

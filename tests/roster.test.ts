@@ -5,6 +5,188 @@ import { refreshRoster } from "../src/roster.ts";
 import { config, now, snapshot, source } from "./helpers.ts";
 
 describe("guild roster refresh", () => {
+  test("stable-ID renames retain enrichment and success times for guild and explicit discovery", async () => {
+    const priorConfig = configSchema.parse({
+      ...config,
+      characters: [{ slug: "old-name", name: "Old Name", id: "123" }],
+    });
+    const prior = await refreshRoster(priorConfig, {}, source(), now);
+    const unavailable = async (): Promise<never> => {
+      throw new ApiError("Blizzard API", 404);
+    };
+    for (const guildDiscovery of [true, false]) {
+      const current = characterSchema.parse({
+        slug: "new-name",
+        name: "New Name",
+        id: "123",
+        guildRank: 3,
+      });
+      const requests: string[] = [];
+      const result = await refreshRoster(
+        configSchema.parse({
+          ...priorConfig,
+          characters: guildDiscovery
+            ? []
+            : [{ slug: current.slug, name: current.name, id: current.id }],
+        }),
+        { "us:id:123": "same-person" },
+        source({
+          guild: async () => (guildDiscovery ? [current] : []),
+          profile: async (slug) => {
+            requests.push(slug);
+            return unavailable();
+          },
+          professions: unavailable,
+          talents: unavailable,
+        }),
+        new Date(now.getTime() + 60_000),
+        prior,
+      );
+      expect(requests).toEqual(["new-name"]);
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0]?.character.slug).toBe("new-name");
+      expect(result.rows[0]?.character.id).toBe("123");
+      expect(result.rows[0]?.character.primary).toEqual(
+        prior.rows[0]?.character.primary,
+      );
+      expect(result.rows[0]?.character.talents).toEqual(
+        prior.rows[0]?.character.talents,
+      );
+      expect(result.rows[0]?.professionFetchedAt).toBe(now.toISOString());
+      expect(result.rows[0]?.talentFetchedAt).toBe(now.toISOString());
+      expect(result.rows[0]?.discord).toBe("same-person");
+    }
+  });
+
+  test("a reused slug never inherits the old ID, enrichment, timestamps or ID-based Discord mapping", async () => {
+    const oldConfig = configSchema.parse({
+      ...config,
+      characters: [{ slug: "shared-name", name: "Shared Name", id: "111" }],
+    });
+    const prior = await refreshRoster(oldConfig, {}, source(), now);
+    const unavailable = async (): Promise<never> => {
+      throw new ApiError("Blizzard API", 404);
+    };
+    for (const profileAvailable of [true, false]) {
+      for (const discovery of ["guild", "explicit", "guild-with-override"]) {
+        const current = characterSchema.parse({
+          slug: "shared-name",
+          name: "Shared Name",
+          id: "999",
+        });
+        const result = await refreshRoster(
+          configSchema.parse({
+            ...oldConfig,
+            characters:
+              discovery === "guild"
+                ? []
+                : [
+                    {
+                      slug: current.slug,
+                      name: current.name,
+                      ...(discovery === "explicit" ? { id: current.id } : {}),
+                    },
+                  ],
+          }),
+          { "us:id:111": "old-person" },
+          source({
+            guild: async () => (discovery === "explicit" ? [] : [current]),
+            profile: profileAvailable
+              ? async () => ({ id: "999" })
+              : unavailable,
+            professions: unavailable,
+            talents: unavailable,
+          }),
+          new Date(now.getTime() + 60_000),
+          prior,
+        );
+        expect(result.rows[0]?.character.id).toBe("999");
+        expect(result.rows[0]?.character.level).toBeUndefined();
+        expect(result.rows[0]?.character.primary).toEqual([]);
+        expect(result.rows[0]?.character.talents).toEqual([]);
+        expect(result.rows[0]?.professionFetchedAt).toBe(null);
+        expect(result.rows[0]?.talentFetchedAt).toBe(null);
+        expect(result.rows[0]?.discord).toBe("");
+      }
+    }
+  });
+
+  test("ID upgrade retains a slug-only snapshot, and contradictory profile IDs abort", async () => {
+    const current = characterSchema.parse({
+      slug: "example-priest",
+      name: "Example Priest",
+      id: "123",
+    });
+    const unavailable = async (): Promise<never> => {
+      throw new ApiError("Blizzard API", 404);
+    };
+    const result = await refreshRoster(
+      configSchema.parse({ ...config, characters: [] }),
+      {},
+      source({ guild: async () => [current], professions: unavailable }),
+      now,
+      snapshot,
+    );
+    expect(result.rows[0]?.character.primary).toEqual(
+      snapshot.rows[0]?.character.primary,
+    );
+    expect(result.rows[0]?.character.id).toBe("123");
+    await expect(
+      refreshRoster(
+        configSchema.parse({ ...config, characters: [] }),
+        {},
+        source({
+          guild: async () => [current],
+          profile: async () => ({ id: "999" }),
+        }),
+      ),
+    ).rejects.toThrow("Character ID changed");
+    await expect(
+      refreshRoster(
+        configSchema.parse({
+          ...config,
+          characters: [{ ...current, id: "999" }],
+        }),
+        {},
+        source({ guild: async () => [current] }),
+      ),
+    ).rejects.toThrow("ID conflicts with guild");
+  });
+
+  test("duplicate IDs and slugs are rejected at config, snapshot and guild boundaries", async () => {
+    const first = characterSchema.parse({
+      slug: "first-name",
+      name: "First Name",
+      id: "123",
+    });
+    const second = { ...first, slug: "second-name", name: "Second Name" };
+    expect(
+      configSchema.safeParse({ ...config, characters: [first, second] })
+        .success,
+    ).toBe(false);
+    const row = snapshot.rows[0];
+    if (!row) throw new Error("fixture");
+    expect(
+      snapshotSchema.safeParse({
+        ...snapshot,
+        rows: [
+          { ...row, character: first },
+          { ...row, character: second },
+        ],
+      }).success,
+    ).toBe(false);
+    await expect(
+      refreshRoster(config, {}, source({ guild: async () => [first, second] })),
+    ).rejects.toThrow("duplicate character identities");
+    await expect(
+      refreshRoster(
+        config,
+        {},
+        source({ guild: async () => [first, { ...first, id: "999" }] }),
+      ),
+    ).rejects.toThrow("duplicate character identities");
+  });
+
   test("minimal explicit overrides retain last-good values when enrichment fails, with or without guild discovery", async () => {
     for (const guild of ["example-guild", undefined]) {
       const initialConfig = configSchema.parse({

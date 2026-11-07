@@ -155,7 +155,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ["Topic", "Details"],
     [
       "Identity",
-      "WoW Forever: region + realmless first-name–surname slug. Rulesets are not realms.",
+      "WoW Forever: region + stable character ID, falling back to the realmless first-name–surname slug when no ID is available. Rulesets are not realms.",
     ],
     [
       "Levels",

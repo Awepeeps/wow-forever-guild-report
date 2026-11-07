@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { BlizzardClient } from "../src/blizzard.ts";
 import { HttpClient } from "../src/http.ts";
+import { configSchema } from "../src/model.ts";
+import { refreshRoster } from "../src/roster.ts";
 
 test("uses Forever realmless paths, profile namespace, OAuth header auth and one cached token", async () => {
   const urls: string[] = [];
@@ -147,4 +149,40 @@ test("unknown response shapes fail; known empty profession/talent responses stay
     specialization_groups: [{ is_active: true }, { is_active: true }],
   };
   expect(await client.talents("example-priest")).toEqual({ talents: [] });
+});
+
+test("OAuth network, JSON and token-schema failures abort enrichment instead of producing a partial snapshot", async () => {
+  for (const failure of ["network", "json", "schema"]) {
+    const urls: string[] = [];
+    const http = new HttpClient(
+      async (input) => {
+        urls.push(String(input));
+        if (failure === "network") throw new Error("private-network-detail");
+        return failure === "json"
+          ? new Response("private-invalid-json")
+          : Response.json({ private_response: "unsupported-token-shape" });
+      },
+      async () => {},
+    );
+    const client = new BlizzardClient(
+      { region: "us", locale: "en_US" },
+      { clientId: "test-id", clientSecret: "test-secret" },
+      http,
+    );
+    const result = refreshRoster(
+      configSchema.parse({
+        version: 1,
+        region: "us",
+        characters: [{ slug: "example-priest", name: "Example Priest" }],
+      }),
+      {},
+      client,
+    );
+    await expect(result).rejects.toThrow("OAuth authentication failed");
+    await expect(result).rejects.not.toThrow("private");
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.every((url) => url === "https://oauth.battle.net/token")).toBe(
+      true,
+    );
+  }
 });
