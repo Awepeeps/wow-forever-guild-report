@@ -75,7 +75,11 @@ test("compact roster keeps skills in Professions and hides technical columns wit
         character: {
           ...base.character,
           class: "Shaman",
-          secondary: [{ name: "Cooking", skill: 0, max: 75 }],
+          primary: base.character.primary.map((p) => ({
+            ...p,
+            tier: p.name.toLocaleLowerCase("en-US"),
+          })),
+          secondary: [{ name: "Cooking", tier: "Cooking", skill: 0, max: 75 }],
         },
       },
       {

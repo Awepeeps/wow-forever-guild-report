@@ -115,10 +115,15 @@ export function buildTables(snapshot: Snapshot): Table[] {
     const describe = (list: Profession[]) =>
       list.length
         ? list
-            .map(
-              (p) =>
-                `${p.name}${p.tier ? ` (${p.tier})` : ""} — ${p.skill ?? "?"}/${p.max ?? "?"}`,
-            )
+            .map((p) => {
+              const tier =
+                p.tier &&
+                p.tier.toLocaleLowerCase("en-US") !==
+                  p.name.toLocaleLowerCase("en-US")
+                  ? ` (${p.tier})`
+                  : "";
+              return `${p.name}${tier} — ${p.skill ?? "?"}/${p.max ?? "?"}`;
+            })
             .join("\n")
         : ["error", "unavailable"].includes(row.professionStatus)
           ? "Unavailable"
