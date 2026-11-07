@@ -16,7 +16,7 @@ Infisical provisioning, private addresses, project IDs and identity credentials 
 
 `GOOGLE_SERVICE_ACCOUNT_JSON` is the service-account key as compact one-line JSON. It takes precedence over `GOOGLE_SERVICE_ACCOUNT_FILE`, so no key file needs to exist on disk.
 
-Writes (enrollment and initial saves) use a separate, short-lived app-only writer identity held by the homelab project. The app itself uses only a **read-only** runtime machine identity limited to this project, environment and path. Never reuse a shared pilot identity or the writer as the runtime identity.
+Writes (enrollment and initial saves) use a separate, short-lived app-only writer identity held by the homelab project. The app itself uses only a **read-only** runtime machine identity limited to this project, environment and path. Never reuse a shared pilot identity or the writer as the runtime identity. Self-hosted Infisical without Enterprise cannot scope a role to one environment or path, so the runtime identity is a project Viewer: keep this project's other environments empty and store nothing else in it.
 
 ## Opting in on a machine
 
