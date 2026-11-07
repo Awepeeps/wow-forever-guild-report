@@ -11,6 +11,7 @@ The lead agent writes implementation code. Delegate research, analysis, and inde
 - `src/http.ts`: bounded retries/timeouts and safe errors. API response bodies, URLs with tokens, and credential values must not enter errors/logs.
 - `src/roster.ts`: guild discovery, independent enrichment, retained data, status, and sorting.
 - `src/workbook.ts`: pure table/CSV/OOXML renderers. Keep formulas and external links out of generated workbooks.
+- `src/presentation.ts`: shared column widths/visibility and readable class colors for XLSX and Google Sheets.
 - `src/sheets.ts`: explicit Google writes, ownership checks, preservation of human Notes.
 - `src/files.ts`, `src/import.ts`, `src/cli.ts`: private I/O, migration, command orchestration.
 
@@ -21,6 +22,8 @@ Keep validation at trust boundaries, pure transforms easy to test, and external 
 Forever identities are region + character ID where available, otherwise region + API slug. Names include a surname; rulesets replace realms. Prefer API slugs over reconstruction. Discord names/IDs stay strings. Guild rank is the numeric API value, not an inferred title.
 
 Characters sort by Discord, then character name, unmapped last, with deterministic ties. Talent points come from `spent_points` for active groups; never guess a spec or sum different groups. Preserve every returned profession tier and secondary profession. Unknown is not zero.
+
+Tab order is Characters, Professions, Guild Info, Export Notes. Keep skill details in Professions, technical diagnostics in hidden columns, and Notes visible and human-owned. Only an owned legacy Data Notes tab may migrate to Export Notes; never rename an unmanaged tab or overwrite a name collision.
 
 A guild lookup/auth failure must not publish an empty successful roster. Individual endpoint failures keep prior/supplied data and mark it incomplete. Keep last-success timestamps when values are retained. `Generated At`/fetch times must not be represented as Blizzard update times.
 

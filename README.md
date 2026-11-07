@@ -19,12 +19,14 @@ just demo        # synthetic data, no credentials/network API access
 
 Open `output/demo/roster.xlsx` in Excel, LibreOffice, or Google Sheets. It has frozen headers and filters:
 
-| Tab         | Contents                                                                                                                        |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Characters  | Discord, name, ruleset, class, faction, race, level, guild rank, talent points, professions/levels, Notes, status and freshness |
-| Guild Info  | Guild, region, generation timestamp, counts by class/faction/ruleset, mapping and API availability                              |
-| Professions | One row per character/profession/tier, including all secondaries and skill/max                                                  |
-| Data Notes  | How to read the generated data: identity, freshness, source links, API limitations                                              |
+| Tab          | Contents                                                                                            |
+| ------------ | --------------------------------------------------------------------------------------------------- |
+| Characters   | Compact roster: Discord, name, class, level, guild rank, talent points, human Notes and API status  |
+| Professions  | One row per character/profession/tier, including all secondaries and skill/max                      |
+| Guild Info   | Guild, region, generation timestamp, counts by class/faction/ruleset, mapping and API availability  |
+| Export Notes | How to read the export: layout, class colors, identity, freshness, source links and API limitations |
+
+Characters and Professions sit side by side, with Discord/name columns frozen. Class cells use recognizable WoW colors with contrasting text; Priest uses light gray. Guild Info shows the export timestamp. Race, faction, ruleset, identity, repeated generation times and per-component diagnostics remain in hidden columns that can be unhidden. CSV files include every column. Professions labels retained data explicitly and keeps characters with unavailable data as placeholder rows rather than silently omitting them.
 
 Each export also includes four CSV files and `snapshot.json`. Offline `just export` defaults to `output/export/`; API `just refresh` defaults to `output/roster/`. Offline export refuses to replace a snapshot containing API statuses, even with an explicit output path. Characters sort by **Discord name, then character name, with unmapped characters last**; ties use the API slug. Names compare in English with case-insensitive grouping and deterministic case ties. API return order does not affect the workbook.
 
@@ -106,11 +108,11 @@ Set `GOOGLE_SPREADSHEET_ID` to the ID in the sheet URL, then run:
 just sheets     # publish output/roster/snapshot.json
 ```
 
-The tool creates Characters, Guild Info, Professions, and Data Notes with ownership metadata and places them first in that order. Later updates replace only those owned tabs in a single atomic Google batch. An existing tab with the same name but no ownership marker is refused before any write: **human tabs are never taken over**. To add generated tabs to an existing hand-maintained spreadsheet, first rename its clashing tabs (for example `Characters (old)`). Other tabs keep their contents. Don't remove the ownership metadata or change the generated identity/header columns.
+The tool creates Characters, Professions, Guild Info, and Export Notes with ownership metadata and places them first in that order. A managed Data Notes tab is renamed to Export Notes in the same atomic batch, preserving its sheet ID; a collision stops the update. Unmanaged tabs are never renamed. Later updates replace only the owned tabs. An existing target tab with no ownership marker is refused before any write: **human tabs are never taken over**. To add generated tabs to an existing hand-maintained spreadsheet, first rename its clashing tabs (for example `Characters (old)`). Other tabs keep their contents. Don't remove the ownership metadata or change the generated identity/header columns.
 
 **Notes belongs to humans.** CSV/API imports never read Notes, and local exports leave that column blank. In managed Google Sheets, existing Notes cell values are carried by region + character identity when rows reorder. If a departing/unidentified character has Notes, publishing stops before changing the sheet; archive the note elsewhere and clear the old cell before retrying. Avoid editing Notes during publishing: the Sheets API has no compare-and-swap for concurrent cell edits. Keep long-term freeform notes in a separate human-owned tab if you need independent editing.
 
-Only content in Notes is preserved; generated tab formatting, dimensions, filters, and other cells are tool-owned. Service account tokens are minted in memory; private keys and access tokens are never placed in workbook output. A failed write is not retried automatically because the outcome may be ambiguous.
+Notes cell values and cell formatting are preserved by identity, including when the column moves. Other generated formatting, dimensions, filters, and cells are tool-owned. Service account tokens are minted in memory; private keys and access tokens are never placed in workbook output. A failed write is not retried automatically because the outcome may be ambiguous.
 
 ## Import the existing roster
 

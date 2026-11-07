@@ -1,5 +1,6 @@
 import { strToU8, zipSync } from "fflate";
-import type { Profession, Snapshot } from "./model.ts";
+import type { Snapshot } from "./model.ts";
+import { classStyle, columnPresentation } from "./presentation.ts";
 
 export type Cell = string | number;
 export interface Table {
@@ -7,32 +8,21 @@ export interface Table {
   rows: Cell[][];
 }
 
-function skill(p: Profession): string {
-  const value =
-    p.skill === undefined
-      ? "unknown"
-      : `${p.skill}${p.max === undefined ? "" : `/${p.max}`}`;
-  return p.tier ? `${p.tier}: ${value}` : value;
-}
-
 export function buildTables(snapshot: Snapshot): Table[] {
   const characters: Cell[][] = [
     [
       "Discord",
       "Character Name",
-      "Ruleset",
       "Class",
-      "Faction",
-      "Race",
       "Level",
       "Guild Rank",
       "Talent Points",
-      "Profession 1",
-      "Profession 2",
       "Notes",
-      "Profession 1 Levels",
-      "Profession 2 Levels",
-      "Secondary Professions & Levels",
+      "API Status",
+      "Generated At",
+      "Ruleset",
+      "Faction",
+      "Race",
       "Region",
       "Character Slug",
       "Character ID",
@@ -43,7 +33,6 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Profile Last Success",
       "Professions Last Success",
       "Talents Last Success",
-      "Generated At",
       "Sync Notes",
     ],
   ];
@@ -51,25 +40,41 @@ export function buildTables(snapshot: Snapshot): Table[] {
     [
       "Discord",
       "Character Name",
-      "Category",
+      "Class",
       "Profession",
+      "Category",
       "Tier",
       "Skill",
       "Maximum",
-      "Status",
+      "Profession API Status",
+      "Generated At",
+      "Professions Last Success",
+      "Region",
       "Character Slug",
+      "Character ID",
     ],
   ];
   for (const row of snapshot.rows) {
     const c = row.character;
-    const names = [...new Set(c.primary.map((p) => p.name))];
+    const statuses = [
+      row.profileStatus,
+      row.professionStatus,
+      row.talentStatus,
+    ];
+    const professionStatus =
+      row.professionStatus === "ok"
+        ? "Complete"
+        : row.professionStatus === "manual"
+          ? "Manual"
+          : c.primary.length || c.secondary.length
+            ? `Retained (${row.professionStatus})`
+            : row.professionStatus === "unavailable"
+              ? "Unavailable"
+              : "Error";
     characters.push([
       row.discord,
       c.name,
-      c.ruleset,
       c.class,
-      c.faction,
-      c.race,
       c.level ?? "",
       c.guildRank ?? "",
       c.talents
@@ -77,18 +82,16 @@ export function buildTables(snapshot: Snapshot): Table[] {
           (t) => `${t.group ? `Group ${t.group}: ` : ""}${t.tree} ${t.points}`,
         )
         .join(", "),
-      names[0] ?? "",
-      names[1] ?? "",
       "",
-      c.primary
-        .filter((p) => p.name === names[0])
-        .map(skill)
-        .join("; "),
-      c.primary
-        .filter((p) => p.name === names[1])
-        .map(skill)
-        .join("; "),
-      c.secondary.map((p) => `${p.name}: ${skill(p)}`).join("; "),
+      statuses.every((s) => s === "manual")
+        ? "Manual"
+        : statuses.every((s) => s === "ok")
+          ? "Complete"
+          : "Incomplete",
+      snapshot.generatedAt,
+      c.ruleset,
+      c.faction,
+      c.race,
       snapshot.region,
       c.slug,
       c.id ?? "",
@@ -99,7 +102,6 @@ export function buildTables(snapshot: Snapshot): Table[] {
       row.profileFetchedAt ?? "",
       row.professionFetchedAt ?? "",
       row.talentFetchedAt ?? "",
-      snapshot.generatedAt,
       row.issue.trim(),
     ]);
     for (const [category, list] of [
@@ -110,15 +112,39 @@ export function buildTables(snapshot: Snapshot): Table[] {
         professions.push([
           row.discord,
           c.name,
-          category,
+          c.class,
           p.name,
+          category,
           p.tier ?? "",
           p.skill ?? "",
           p.max ?? "",
-          row.professionStatus,
+          professionStatus,
+          snapshot.generatedAt,
+          row.professionFetchedAt ?? "",
+          snapshot.region,
           c.slug,
+          c.id ?? "",
         ]);
     }
+    if (!c.primary.length && !c.secondary.length)
+      professions.push([
+        row.discord,
+        c.name,
+        c.class,
+        ["error", "unavailable"].includes(row.professionStatus)
+          ? "Unavailable"
+          : "None reported",
+        "",
+        "",
+        "",
+        "",
+        professionStatus,
+        snapshot.generatedAt,
+        row.professionFetchedAt ?? "",
+        snapshot.region,
+        c.slug,
+        c.id ?? "",
+      ]);
   }
   const guild: Cell[][] = [
     ["Metric", "Value"],
@@ -153,6 +179,18 @@ export function buildTables(snapshot: Snapshot): Table[] {
   }
   const reference: Cell[][] = [
     ["Topic", "Details"],
+    [
+      "Layout",
+      "Characters is the roster overview; Professions has all primary/secondary skills and tiers. Guild Info shows the export timestamp. Technical identity, status, generation and last-success columns are hidden by default and can be unhidden. CSV files include all columns.",
+    ],
+    [
+      "Class colors",
+      "Class cells use recognizable WoW colors with contrasting text; Priest uses light gray. Class names remain visible, so color is not the only identifier.",
+    ],
+    [
+      "API status",
+      "Incomplete means at least one API component failed; retained values may be older than this export. Unhide the individual statuses and last-success columns to identify which component is stale. Profession API Status labels retained data explicitly.",
+    ],
     [
       "Identity",
       "WoW Forever: region + stable character ID, falling back to the realmless first-name–surname slug when no ID is available. Rulesets are not realms.",
@@ -193,9 +231,9 @@ export function buildTables(snapshot: Snapshot): Table[] {
   ];
   return [
     { name: "Characters", rows: characters },
-    { name: "Guild Info", rows: guild },
     { name: "Professions", rows: professions },
-    { name: "Data Notes", rows: reference },
+    { name: "Guild Info", rows: guild },
+    { name: "Export Notes", rows: reference },
   ];
 }
 
@@ -237,6 +275,24 @@ function column(index: number): string {
 
 // A small OOXML writer: inline strings avoid formulas and external links entirely.
 export function toXlsx(tables: Table[]): Uint8Array {
+  const classNames = [
+    ...new Set(
+      tables.flatMap((table) => {
+        const index = table.rows[0]?.indexOf("Class") ?? -1;
+        return index < 0
+          ? []
+          : table.rows
+              .slice(1)
+              .map((row) =>
+                String(row[index] ?? "")
+                  .trim()
+                  .toLowerCase(),
+              )
+              .filter(Boolean);
+      }),
+    ),
+  ];
+  const classStyles = classNames.map(classStyle);
   const files: Record<string, Uint8Array> = {};
   const add = (path: string, body: string) => {
     files[path] = strToU8(
@@ -263,20 +319,40 @@ export function toXlsx(tables: Table[]): Uint8Array {
   );
   add(
     "xl/styles.xml",
-    `<styleSheet xmlns="${ns}"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
+    `<styleSheet xmlns="${ns}"><fonts count="${2 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}</fonts><fills count="${3 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}</fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${2 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
   );
   tables.forEach((table, i) => {
     const width = table.rows[0]?.length ?? 1;
     const last = `${column(width - 1)}${Math.max(1, table.rows.length)}`;
+    const classColumn = table.rows[0]?.indexOf("Class") ?? -1;
+    const frozen = ["Characters", "Professions"].includes(table.name);
     const rows = table.rows
       .map(
         (row, r) =>
-          `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : ""}>${row.map((cell, c) => `<c r="${column(c)}${r + 1}" s="${r === 0 ? 1 : 0}" t="${typeof cell === "number" ? "n" : "inlineStr"}">${typeof cell === "number" ? `<v>${cell}</v>` : `<is><t xml:space="preserve">${xml(cell)}</t></is>`}</c>`).join("")}</row>`,
+          `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : ""}>${row
+            .map((cell, c) => {
+              const colorIndex =
+                c === classColumn
+                  ? classNames.indexOf(String(cell).trim().toLowerCase())
+                  : -1;
+              const style = r === 0 ? 1 : colorIndex < 0 ? 0 : colorIndex + 2;
+              return `<c r="${column(c)}${r + 1}" s="${style}" t="${typeof cell === "number" ? "n" : "inlineStr"}">${typeof cell === "number" ? `<v>${cell}</v>` : `<is><t xml:space="preserve">${xml(cell)}</t></is>`}</c>`;
+            })
+            .join("")}</row>`,
       )
       .join("");
     add(
       `xl/worksheets/sheet${i + 1}.xml`,
-      `<worksheet xmlns="${ns}"><dimension ref="A1:${last}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="${width}" width="24" customWidth="1"/></cols><sheetData>${rows}</sheetData><autoFilter ref="A1:${last}"/></worksheet>`,
+      `<worksheet xmlns="${ns}"><dimension ref="A1:${last}"/><sheetViews><sheetView workbookViewId="0"><pane ${frozen ? 'xSplit="2" ' : ""}ySplit="1" topLeftCell="${frozen ? "C2" : "A2"}" activePane="${frozen ? "bottomRight" : "bottomLeft"}" state="frozen"/></sheetView></sheetViews><cols>${(
+        table.rows[0] ?? [""]
+      )
+        .map((header, c) => {
+          const presentation = columnPresentation(table.name, String(header));
+          return `<col min="${c + 1}" max="${c + 1}" width="${(presentation.width / 7).toFixed(2)}" customWidth="1"${presentation.hidden ? ' hidden="1"' : ""}/>`;
+        })
+        .join(
+          "",
+        )}</cols><sheetData>${rows}</sheetData><autoFilter ref="A1:${last}"/></worksheet>`,
     );
   });
   return zipSync(files, { level: 6 });

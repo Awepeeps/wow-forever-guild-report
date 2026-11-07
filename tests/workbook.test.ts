@@ -37,13 +37,13 @@ test("CSV strings cannot become formulas and quoted multiline data round trips",
   expect(result[0]?.[6]).toBe("0");
 });
 
-test("workbook has first Characters/Guild Info tabs, real numeric cells, frozen headers, literal strings and freshness", () => {
+test("workbook has adjacent roster/profession tabs, real numeric cells, frozen headers, literal strings and freshness", () => {
   const tables = buildTables(snapshot);
   expect(tables.map((t) => t.name)).toEqual([
     "Characters",
-    "Guild Info",
     "Professions",
-    "Data Notes",
+    "Guild Info",
+    "Export Notes",
   ]);
   expect(tables[0]?.rows[1]).toContain(snapshot.generatedAt);
   expect(tables[0]?.rows[0]).toContain("Guild Rank");
@@ -62,4 +62,77 @@ test("workbook has first Characters/Guild Info tabs, real numeric cells, frozen 
   expect(sheet).toContain("<v>17</v>");
   expect(sheet).toContain('state="frozen"');
   expect(files["[Content_Types].xml"]).toBeDefined();
+});
+
+test("compact roster keeps skills in Professions and hides technical columns without discarding their data", () => {
+  const base = snapshot.rows[0];
+  if (!base) throw new Error("fixture");
+  const tables = buildTables({
+    ...snapshot,
+    rows: [
+      {
+        ...base,
+        character: {
+          ...base.character,
+          class: "Shaman",
+          secondary: [{ name: "Cooking", skill: 0, max: 75 }],
+        },
+      },
+      {
+        ...base,
+        character: {
+          ...base.character,
+          slug: "unavailable-mage",
+          name: "Unavailable Mage",
+          primary: [],
+          secondary: [],
+        },
+        professionStatus: "unavailable",
+      },
+    ],
+  });
+  const characters = tables[0];
+  const professions = tables[1];
+  if (!characters || !professions) throw new Error("fixture");
+  expect(characters.rows[0]?.slice(0, 9)).toEqual([
+    "Discord",
+    "Character Name",
+    "Class",
+    "Level",
+    "Guild Rank",
+    "Talent Points",
+    "Notes",
+    "API Status",
+    "Generated At",
+  ]);
+  expect(
+    characters.rows[0]
+      ?.slice(0, 9)
+      .some((header) => String(header).includes("Profession")),
+  ).toBe(false);
+  expect(characters.rows[0]).not.toContain("Profession 1");
+  expect(JSON.stringify(characters.rows)).not.toContain("Alchemy");
+  expect(
+    professions.rows.some((row) => row.includes("Alchemy") && row.includes(50)),
+  ).toBe(true);
+  expect(
+    professions.rows.some((row) => row.includes("Cooking") && row.includes(0)),
+  ).toBe(true);
+  expect(
+    professions.rows.some(
+      (row) => row.includes("Unavailable Mage") && row.includes("Unavailable"),
+    ),
+  ).toBe(true);
+  const files = unzipSync(toXlsx(tables));
+  const sheet = strFromU8(
+    files["xl/worksheets/sheet1.xml"] ?? new Uint8Array(),
+  );
+  const styles = strFromU8(files["xl/styles.xml"] ?? new Uint8Array());
+  expect(sheet).toContain('topLeftCell="C2"');
+  expect(sheet).toContain(
+    'min="10" max="10" width="25.71" customWidth="1" hidden="1"',
+  );
+  expect(sheet).toContain('r="C2" s="2"');
+  expect(styles).toContain('rgb="FF0070DE"');
+  expect(toCsv(characters.rows)).toContain("Character Slug");
 });

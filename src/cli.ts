@@ -120,7 +120,7 @@ async function main(): Promise<void> {
       await googleToken(process.env),
     );
     console.log(
-      "Published Characters, Guild Info, Professions, and Data Notes; preserved human Notes.",
+      "Published Characters, Professions, Guild Info, and Export Notes; preserved human Notes.",
     );
     return;
   }

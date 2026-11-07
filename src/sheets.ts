@@ -2,6 +2,7 @@ import { createSign } from "node:crypto";
 import { z } from "zod";
 import { readJson } from "./files.ts";
 import { HttpClient, SafeError } from "./http.ts";
+import { classStyle, columnPresentation, rgb } from "./presentation.ts";
 import type { Table } from "./workbook.ts";
 
 const serviceAccountSchema = z.object({
@@ -16,6 +17,10 @@ const valueSchema = z.union([
   z.object({ formulaValue: z.string() }).strict(),
 ]);
 type SheetValue = z.infer<typeof valueSchema>;
+interface NoteCell {
+  userEnteredValue?: SheetValue | undefined;
+  userEnteredFormat?: Record<string, unknown> | undefined;
+}
 function rowKey(
   row: readonly (string | number)[],
   headers: readonly (string | number)[],
@@ -59,7 +64,12 @@ const gridSchema = z.object({
                 z.object({
                   values: z
                     .array(
-                      z.object({ userEnteredValue: valueSchema.optional() }),
+                      z.object({
+                        userEnteredValue: valueSchema.optional(),
+                        userEnteredFormat: z
+                          .record(z.string(), z.unknown())
+                          .optional(),
+                      }),
                     )
                     .default([]),
                 }),
@@ -73,9 +83,9 @@ const gridSchema = z.object({
 });
 
 export function preservedNotes(
-  rows: { values: { userEnteredValue?: SheetValue | undefined }[] }[],
+  rows: { values: NoteCell[] }[],
   table: Table,
-): Map<string, SheetValue> {
+): Map<string, NoteCell> {
   const textValue = (v: SheetValue | undefined) =>
     v && "stringValue" in v ? v.stringValue : "";
   const headers =
@@ -94,21 +104,30 @@ export function preservedNotes(
       .slice(1)
       .flatMap((r) => [rowKey(r, currentHeader), slugKey(r, currentHeader)]),
   );
-  const result = new Map<string, SheetValue>();
+  const result = new Map<string, NoteCell>();
   for (const row of rows.slice(1)) {
-    const note = row.values[noteIndex]?.userEnteredValue;
-    if (!note || ("stringValue" in note && note.stringValue === "")) continue;
+    const cell = row.values[noteIndex];
+    const note = cell?.userEnteredValue;
+    const hasContent =
+      note && !("stringValue" in note && note.stringValue === "");
+    if (!hasContent && !cell?.userEnteredFormat) continue;
     const id = textValue(row.values[idIndex]?.userEnteredValue);
     const key = `${textValue(row.values[regionIndex]?.userEnteredValue)}:${id ? `id:${id}` : textValue(row.values[slugIndex]?.userEnteredValue)}`;
-    if (!currentKeys.has(key))
+    if (!currentKeys.has(key) && hasContent)
       throw new SafeError(
         "A departing or unidentified character has Notes. Archive those notes and clear their cells before publishing; no sheet changes were made.",
       );
+    if (!currentKeys.has(key)) continue;
     if (result.has(key))
       throw new SafeError(
         "Duplicate character identities have Notes. Resolve duplicates before publishing.",
       );
-    result.set(key, note);
+    result.set(key, {
+      userEnteredValue: note ?? { stringValue: "" },
+      ...(cell?.userEnteredFormat
+        ? { userEnteredFormat: cell.userEnteredFormat }
+        : {}),
+    });
   }
   return result;
 }
@@ -177,7 +196,7 @@ export async function googleToken(
 export function sheetRequests(
   tables: Table[],
   existing: { sheetId: number; title: string }[],
-  notes = new Map<string, SheetValue>(),
+  notes = new Map<string, NoteCell>(),
 ): unknown[] {
   const used = new Set(existing.map((s) => s.sheetId));
   const requests: unknown[] = [];
@@ -186,6 +205,14 @@ export function sheetRequests(
     let id = existing.find((s) => s.title === title)?.sheetId;
     const rows = table.rows.length;
     const columns = table.rows[0]?.length ?? 1;
+    const frozenColumnCount = ["Characters", "Professions"].includes(title)
+      ? 2
+      : 0;
+    const noteColumn =
+      title === "Characters" ? (table.rows[0]?.indexOf("Notes") ?? -1) : -1;
+    const noteFor = (row: (string | number)[]) =>
+      notes.get(rowKey(row, table.rows[0] ?? [])) ??
+      notes.get(slugKey(row, table.rows[0] ?? []));
     if (id === undefined) {
       id = 10_000;
       while (used.has(id)) id++;
@@ -200,6 +227,7 @@ export function sheetRequests(
               rowCount: Math.max(rows, 2),
               columnCount: columns,
               frozenRowCount: 1,
+              frozenColumnCount,
             },
           },
         },
@@ -225,6 +253,7 @@ export function sheetRequests(
               rowCount: Math.max(rows, 2),
               columnCount: columns,
               frozenRowCount: 1,
+              frozenColumnCount,
             },
           },
           fields: "gridProperties,index",
@@ -247,8 +276,7 @@ export function sheetRequests(
               table.name === "Characters" &&
               r > 0 &&
               table.rows[0]?.[c] === "Notes"
-                ? (notes.get(rowKey(row, table.rows[0])) ??
-                  notes.get(slugKey(row, table.rows[0])) ?? { stringValue: "" })
+                ? (noteFor(row)?.userEnteredValue ?? { stringValue: "" })
                 : typeof cell === "number"
                   ? { numberValue: cell }
                   : { stringValue: cell },
@@ -257,6 +285,84 @@ export function sheetRequests(
         fields: "userEnteredValue",
       },
     });
+    // Shared formatting is range-based so a large guild remains one bounded batch.
+    const bodyRanges =
+      noteColumn < 0
+        ? [[0, columns]]
+        : [
+            [0, noteColumn],
+            [noteColumn + 1, columns],
+          ];
+    if (rows > 1) {
+      for (const [start, end] of bodyRanges)
+        if (start !== end)
+          requests.push({
+            repeatCell: {
+              range: {
+                sheetId: id,
+                startRowIndex: 1,
+                endRowIndex: rows,
+                startColumnIndex: start,
+                endColumnIndex: end,
+              },
+              cell: {
+                userEnteredFormat: {
+                  backgroundColor: rgb("FFFFFF"),
+                  textFormat: { foregroundColor: rgb("172B3A"), bold: false },
+                  wrapStrategy: "WRAP",
+                  verticalAlignment: "TOP",
+                },
+              },
+              fields: "userEnteredFormat",
+            },
+          });
+      const classColumn = table.rows[0]?.indexOf("Class") ?? -1;
+      if (classColumn >= 0)
+        requests.push({
+          updateCells: {
+            start: { sheetId: id, rowIndex: 1, columnIndex: classColumn },
+            rows: table.rows.slice(1).map((row) => {
+              const name = String(row[classColumn] ?? "");
+              const style = classStyle(name);
+              return {
+                values: [
+                  {
+                    userEnteredFormat: {
+                      backgroundColor: rgb(name ? style.background : "FFFFFF"),
+                      textFormat: {
+                        foregroundColor: rgb(
+                          name ? style.foreground : "172B3A",
+                        ),
+                        bold: Boolean(name),
+                      },
+                      wrapStrategy: "WRAP",
+                      verticalAlignment: "TOP",
+                    },
+                  },
+                ],
+              };
+            }),
+            fields: "userEnteredFormat",
+          },
+        });
+      if (noteColumn >= 0)
+        requests.push({
+          updateCells: {
+            start: { sheetId: id, rowIndex: 1, columnIndex: noteColumn },
+            rows: table.rows.slice(1).map((row) => ({
+              values: [
+                {
+                  userEnteredFormat: noteFor(row)?.userEnteredFormat ?? {
+                    wrapStrategy: "WRAP",
+                    verticalAlignment: "TOP",
+                  },
+                },
+              ],
+            })),
+            fields: "userEnteredFormat",
+          },
+        });
+    }
     requests.push({
       repeatCell: {
         range: { sheetId: id, startRowIndex: 0, endRowIndex: 1 },
@@ -273,18 +379,33 @@ export function sheetRequests(
         fields: "userEnteredFormat",
       },
     });
-    requests.push({
-      updateDimensionProperties: {
-        range: {
-          sheetId: id,
-          dimension: "COLUMNS",
-          startIndex: 0,
-          endIndex: columns,
+    for (const [c, header] of (table.rows[0] ?? []).entries())
+      requests.push({
+        updateDimensionProperties: {
+          range: {
+            sheetId: id,
+            dimension: "COLUMNS",
+            startIndex: c,
+            endIndex: c + 1,
+          },
+          properties: {
+            pixelSize: columnPresentation(title, String(header)).width,
+            hiddenByUser: columnPresentation(title, String(header)).hidden,
+          },
+          fields: "pixelSize,hiddenByUser",
         },
-        properties: { pixelSize: 180 },
-        fields: "pixelSize",
-      },
-    });
+      });
+    if (rows > 1)
+      requests.push({
+        autoResizeDimensions: {
+          dimensions: {
+            sheetId: id,
+            dimension: "ROWS",
+            startIndex: 1,
+            endIndex: rows,
+          },
+        },
+      });
     requests.push({
       setBasicFilter: {
         filter: {
@@ -326,8 +447,29 @@ export async function publishSheets(
   );
   if (!parsed.success)
     throw new SafeError("Google Sheets metadata has an unsupported shape.");
+  const owned = (sheet: (typeof parsed.data.sheets)[number]) =>
+    sheet.developerMetadata.some(
+      (m) => m.metadataKey === marker && m.metadataValue === "managed",
+    );
+  const legacy = tables.some((table) => table.name === "Export Notes")
+    ? parsed.data.sheets.find(
+        (s) => s.properties.title === "Data Notes" && owned(s),
+      )
+    : undefined;
+  if (
+    legacy &&
+    parsed.data.sheets.some((s) => s.properties.title === "Export Notes")
+  )
+    throw new SafeError(
+      "Both Data Notes and Export Notes exist. Resolve the tab collision before publishing; no changes were made.",
+    );
+  const existingSheets = parsed.data.sheets.map((s) =>
+    s === legacy
+      ? { ...s, properties: { ...s.properties, title: "Export Notes" } }
+      : s,
+  );
   for (const table of tables) {
-    const existing = parsed.data.sheets.find(
+    const existing = existingSheets.find(
       (s) => s.properties.title === table.name,
     );
     if (
@@ -340,12 +482,12 @@ export async function publishSheets(
         "Target contains an unmanaged roster tab. Use a new spreadsheet; existing human sheets were left alone.",
       );
   }
-  let notes = new Map<string, SheetValue>();
+  let notes = new Map<string, NoteCell>();
   if (parsed.data.sheets.some((s) => s.properties.title === "Characters")) {
     const grid = gridSchema.safeParse(
       await http.json(
         "Google Sheets",
-        `${url}?ranges=${encodeURIComponent("'Characters'")}&includeGridData=true&fields=sheets(data(rowData(values(userEnteredValue))))`,
+        `${url}?ranges=${encodeURIComponent("'Characters'")}&includeGridData=true&fields=sheets(data(rowData(values(userEnteredValue,userEnteredFormat))))`,
         { headers },
       ),
     );
@@ -358,11 +500,26 @@ export async function publishSheets(
     notes = preservedNotes(grid.data.sheets[0]?.data[0]?.rowData ?? [], table);
   }
   const body = JSON.stringify({
-    requests: sheetRequests(
-      tables,
-      parsed.data.sheets.map((s) => s.properties),
-      notes,
-    ),
+    requests: [
+      ...(legacy
+        ? [
+            {
+              updateSheetProperties: {
+                properties: {
+                  sheetId: legacy.properties.sheetId,
+                  title: "Export Notes",
+                },
+                fields: "title",
+              },
+            },
+          ]
+        : []),
+      ...sheetRequests(
+        tables,
+        existingSheets.map((s) => s.properties),
+        notes,
+      ),
+    ],
   });
   if (Buffer.byteLength(body) > 8_000_000)
     throw new SafeError(

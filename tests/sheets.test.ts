@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
 import { HttpClient } from "../src/http.ts";
+import { classStyle, rgb } from "../src/presentation.ts";
 import {
   googleToken,
   preservedNotes,
@@ -143,6 +144,69 @@ test("Notes follow stable IDs through renames and survive the first slug-to-ID u
   ).toContain("Human note");
 });
 
+test("Notes formatting follows identity even for empty cells when rows reorder", () => {
+  const base = snapshot.rows[0];
+  if (!base) throw new Error("fixture");
+  const table = buildTables({
+    ...snapshot,
+    rows: [{ ...base, character: { ...base.character, slug: "second" } }, base],
+  })[0];
+  if (!table) throw new Error("fixture");
+  const formats = [
+    { textFormat: { bold: true } },
+    { backgroundColor: { red: 0.8 } },
+  ];
+  const oldRows = [
+    {
+      values: ["Region", "Character Slug", "Notes"].map((stringValue) => ({
+        userEnteredValue: { stringValue },
+      })),
+    },
+    ...["example-priest", "second"].map((slug, i) => ({
+      values: [
+        { userEnteredValue: { stringValue: "us" } },
+        { userEnteredValue: { stringValue: slug } },
+        {
+          userEnteredValue: { stringValue: i === 0 ? "" : "Human note" },
+          userEnteredFormat: formats[i],
+        },
+      ],
+    })),
+  ];
+  const notes = preservedNotes(oldRows, table);
+  const requests = sheetRequests(
+    [table],
+    [{ sheetId: 3, title: "Characters" }],
+    notes,
+  ) as {
+    updateCells?: {
+      start?: { columnIndex: number };
+      rows: { values: { userEnteredFormat?: unknown }[] }[];
+    };
+    repeatCell?: {
+      range: {
+        startRowIndex: number;
+        startColumnIndex?: number;
+        endColumnIndex?: number;
+      };
+    };
+  }[];
+  const restored = requests.find(
+    (r) => r.updateCells?.start?.columnIndex === 6,
+  )?.updateCells;
+  expect(restored?.rows.map((r) => r.values[0]?.userEnteredFormat)).toEqual([
+    formats[1],
+    formats[0],
+  ]);
+  for (const request of requests) {
+    const range = request.repeatCell?.range;
+    if (range?.startRowIndex === 1)
+      expect(
+        (range.endColumnIndex ?? 24) <= 6 || (range.startColumnIndex ?? 0) > 6,
+      ).toBe(true);
+  }
+});
+
 test("Sheets writes are never retried after ambiguous server errors", async () => {
   let writes = 0;
   const http = new HttpClient(
@@ -171,6 +235,251 @@ test("Google credentials are command-specific and short-lived OAuth tokens can b
   expect(
     await googleToken({ GOOGLE_ACCESS_TOKEN: "temporary-test-token" }),
   ).toBe("temporary-test-token");
+});
+
+test("layout migration renames only owned Data Notes in the same batch and preserves Notes through column removal", async () => {
+  const tables = buildTables(snapshot);
+  const humanFormat = {
+    textFormat: { bold: true, foregroundColor: { red: 0.7 } },
+    backgroundColor: { green: 0.8 },
+  };
+  const calls: { url: string; init: RequestInit | undefined }[] = [];
+  const http = new HttpClient(async (input, init) => {
+    const url = String(input);
+    calls.push({ url, init });
+    if (url.includes(":batchUpdate")) return Response.json({});
+    if (url.includes("includeGridData"))
+      return Response.json({
+        sheets: [
+          {
+            data: [
+              {
+                rowData: [
+                  {
+                    values: [
+                      "Discord",
+                      "Profession 1",
+                      "Notes",
+                      "Region",
+                      "Character Slug",
+                    ].map((stringValue) => ({
+                      userEnteredValue: { stringValue },
+                    })),
+                  },
+                  {
+                    values: [
+                      "example",
+                      "Alchemy",
+                      "Keep this human note",
+                      "us",
+                      "example-priest",
+                    ].map((stringValue, index) => ({
+                      userEnteredValue: { stringValue },
+                      ...(index === 2
+                        ? { userEnteredFormat: humanFormat }
+                        : {}),
+                    })),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    return Response.json({
+      sheets: [
+        {
+          properties: { sheetId: 3, title: "Characters" },
+          developerMetadata: [
+            {
+              metadataKey: "wow-forever-guild-report-v1",
+              metadataValue: "managed",
+            },
+          ],
+        },
+        {
+          properties: { sheetId: 6, title: "Data Notes" },
+          developerMetadata: [
+            {
+              metadataKey: "wow-forever-guild-report-v1",
+              metadataValue: "managed",
+            },
+          ],
+        },
+        { properties: { sheetId: 9, title: "Reference Info" } },
+      ],
+    });
+  });
+  await publishSheets(tables, "example-spreadsheet-id", "test-token", http);
+  const body = JSON.parse(String(calls[2]?.init?.body)) as {
+    requests: {
+      updateSheetProperties?: {
+        properties: { sheetId: number; title?: string };
+      };
+      updateCells?: {
+        range?: { sheetId: number };
+        start?: { sheetId: number; columnIndex: number };
+        rows: {
+          values: {
+            userEnteredValue?: { stringValue?: string };
+            userEnteredFormat?: unknown;
+          }[];
+        }[];
+      };
+    }[];
+  };
+  expect(body.requests[0]?.updateSheetProperties?.properties).toEqual({
+    sheetId: 6,
+    title: "Export Notes",
+  });
+  const updatedCharacters = body.requests.find(
+    (r) => r.updateCells?.range?.sheetId === 3,
+  )?.updateCells;
+  expect(
+    updatedCharacters?.rows[1]?.values[6]?.userEnteredValue?.stringValue,
+  ).toBe("Keep this human note");
+  expect(
+    body.requests.find(
+      (r) =>
+        r.updateCells?.start?.sheetId === 3 &&
+        r.updateCells.start.columnIndex === 6,
+    )?.updateCells?.rows[0]?.values[0]?.userEnteredFormat,
+  ).toEqual(humanFormat);
+  expect(JSON.stringify(body)).not.toContain('"sheetId":9');
+  expect(
+    calls.filter((call) => call.url.includes(":batchUpdate")),
+  ).toHaveLength(1);
+});
+
+test("an unmanaged Data Notes stays untouched, and an Export Notes collision stops the rename before writing", async () => {
+  for (const collision of [false, true]) {
+    let writes = 0;
+    let batch = "";
+    const http = new HttpClient(async (input, init) => {
+      if (String(input).includes(":batchUpdate")) {
+        writes++;
+        batch = String(init?.body);
+        return Response.json({});
+      }
+      return Response.json({
+        sheets: [
+          {
+            properties: { sheetId: 6, title: "Data Notes" },
+            ...(collision
+              ? {
+                  developerMetadata: [
+                    {
+                      metadataKey: "wow-forever-guild-report-v1",
+                      metadataValue: "managed",
+                    },
+                  ],
+                }
+              : {}),
+          },
+          ...(collision
+            ? [{ properties: { sheetId: 8, title: "Export Notes" } }]
+            : []),
+        ],
+      });
+    });
+    const publish = publishSheets(
+      buildTables(snapshot),
+      "example-spreadsheet-id",
+      "test-token",
+      http,
+    );
+    if (collision) {
+      await expect(publish).rejects.toThrow("collision");
+      expect(writes).toBe(0);
+    } else {
+      await publish;
+      expect(writes).toBe(1);
+      expect(batch).not.toContain('"sheetId":6');
+    }
+  }
+});
+
+test("class formatting preserves names, uses readable text, and hides diagnostics rather than Notes", () => {
+  const row = snapshot.rows[0];
+  if (!row) throw new Error("fixture");
+  const table = buildTables({
+    ...snapshot,
+    rows: [{ ...row, character: { ...row.character, class: "Shaman" } }],
+  })[0];
+  if (!table) throw new Error("fixture");
+  const requests = sheetRequests(
+    [table],
+    [{ sheetId: 3, title: "Characters" }],
+  ) as {
+    updateCells?: {
+      start?: { columnIndex: number };
+      rows: {
+        values: {
+          userEnteredValue?: { stringValue?: string };
+          userEnteredFormat?: {
+            backgroundColor: unknown;
+            textFormat: { foregroundColor: unknown };
+          };
+        }[];
+      }[];
+    };
+    updateDimensionProperties?: {
+      range: { startIndex: number };
+      properties: { hiddenByUser: boolean };
+    };
+  }[];
+  const classValue = requests.find((r) => r.updateCells)?.updateCells?.rows[1]
+    ?.values[2];
+  const classCell = requests.find(
+    (r) => r.updateCells?.start?.columnIndex === 2,
+  )?.updateCells?.rows[0]?.values[0];
+  expect(classValue?.userEnteredValue?.stringValue).toBe("Shaman");
+  expect(classCell?.userEnteredFormat?.backgroundColor).toEqual(rgb("0070DE"));
+  expect(classCell?.userEnteredFormat?.textFormat.foregroundColor).toEqual(
+    rgb("FFFFFF"),
+  );
+  expect(classStyle("Unknown Class").background).toBe("E5E7EB");
+  expect(classStyle("__proto__").background).toBe("E5E7EB");
+  const dimensions = requests.flatMap((r) =>
+    r.updateDimensionProperties ? [r.updateDimensionProperties] : [],
+  );
+  expect(
+    dimensions.find((d) => d.range.startIndex === 6)?.properties.hiddenByUser,
+  ).toBe(false);
+  expect(
+    dimensions.find((d) => d.range.startIndex === 8)?.properties.hiddenByUser,
+  ).toBe(true);
+});
+
+test("large guild formatting stays within a single bounded Sheets batch", () => {
+  const base = snapshot.rows[0];
+  if (!base) throw new Error("fixture");
+  const tables = buildTables({
+    ...snapshot,
+    rows: Array.from({ length: 500 }, (_, i) => ({
+      ...base,
+      character: {
+        ...base.character,
+        slug: `synthetic-character-${i}`,
+        name: `Synthetic Character ${i}`,
+        class: "Shaman",
+        primary: ["Alchemy", "Herbalism"].map((name) => ({
+          name,
+          skill: 50,
+          max: 75,
+        })),
+        secondary: ["Cooking", "Fishing", "First Aid"].map((name) => ({
+          name,
+          skill: 50,
+          max: 75,
+        })),
+      },
+    })),
+  });
+  const bytes = Buffer.byteLength(
+    JSON.stringify({ requests: sheetRequests(tables, []) }),
+  );
+  expect(bytes).toBeLessThan(4_000_000);
 });
 
 test("an inline service-account key mints a token and malformed keys never echo their content", async () => {
