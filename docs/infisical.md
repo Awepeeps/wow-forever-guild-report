@@ -1,39 +1,49 @@
-# Move from local Varlock files to self-hosted Infisical
+# Loading secrets from self-hosted Infisical
 
-The app reads the same environment contract regardless of where Varlock resolves values. Local `.env.local` is the initial implementation. Infisical provisioning, private addresses, project IDs, identity credentials and trusted network access belong to the homelab project and are deliberately absent here. The selected storage scope is a dedicated project `wow-forever-guild-report`, environment `prod`, path `/runtime`, with keys `BLIZZARD_CLIENT_ID` and `BLIZZARD_CLIENT_SECRET`. Saving those credentials and enabling runtime resolution are separate operations: this repository does not provision infrastructure or automatically enable an Infisical resolver.
+The app reads one environment contract (`.env.schema`) regardless of where Varlock resolves values. By default, values come from the private `.env.local`. A machine can opt into Infisical instead, using the pinned [Varlock Infisical plugin](https://varlock.dev/plugins/infisical/) (`@varlock/infisical-plugin`, exact version in `package.json`/`bun.lock`).
 
-Provisioning and initial writes require an owner admin session or an app-only writer identity. Never reuse a shared pilot project's identity as this app's runtime access. Create only missing keys, refuse conflicting existing values, and verify exact readback without printing values before removing temporary handoff files. Homelab guidance recommends separate development/production access, read-only runtime identities and token lifetimes targeting 15 minutes or less.
+Infisical provisioning, private addresses, project IDs and identity credentials belong to the homelab project and are deliberately absent here. This repository never provisions infrastructure.
 
-Before connecting, establish the instance's trusted HTTPS endpoint, CA trust, reachable runner, project/environment/path, and a dedicated **read-only** machine identity scoped to this application's secrets. Keep development and production access separate. Do not disable TLS verification or expose the instance publicly for this CLI. Prefer short-lived/OIDC machine identity credentials where the runner and homelab support them; Universal Auth is a practical bootstrap alternative.
+## Scope
 
-The [native Varlock Infisical plugin](https://varlock.dev/plugins/infisical/) supports a custom `siteUrl`, Universal Auth, OIDC, and path-scoped resolution. Once the homelab contract is agreed, pin its package version with Bun and keep the version in `bun.lock`. Add its root decorators to `.env.schema`, keeping all bootstrap values private. Example structure (placeholders only; not active configuration):
+| Item        | Value                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------ |
+| Project     | dedicated `wow-forever-guild-report`                                                                   |
+| Environment | `prod` (`INFISICAL_ENVIRONMENT`, default `prod`)                                                       |
+| Path        | `/runtime` (fixed in `.env.schema`)                                                                    |
+| Keys        | `BLIZZARD_CLIENT_ID`, `BLIZZARD_CLIENT_SECRET`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SPREADSHEET_ID` |
+| Stays local | `DISCORD_MAP_FILE` and the mapping, roster config, exports                                             |
+
+`GOOGLE_SERVICE_ACCOUNT_JSON` is the service-account key as compact one-line JSON. It takes precedence over `GOOGLE_SERVICE_ACCOUNT_FILE`, so no key file needs to exist on disk.
+
+Writes (enrollment and initial saves) use a separate, short-lived app-only writer identity held by the homelab project. The app itself uses only a **read-only** runtime machine identity limited to this project, environment and path. Never reuse a shared pilot identity or the writer as the runtime identity.
+
+## Opting in on a machine
+
+The plugin is initialized in `.env.schema` but stays inactive while the bootstrap values are empty, so CI, `just demo` and offline exports never contact Infisical. To opt in, set the bootstrap values in the private `.env.local` and switch each migrated key to the resolver:
 
 ```dotenv
-# @plugin(@varlock/infisical-plugin)
-# @initInfisical(projectId=$INFISICAL_PROJECT_ID, environment=$INFISICAL_ENVIRONMENT, clientId=$INFISICAL_CLIENT_ID, clientSecret=$INFISICAL_CLIENT_SECRET, siteUrl=$INFISICAL_SITE_URL, secretPath=/runtime)
-# @defaultRequired=false
-# @defaultSensitive=true
-# ---
-
-# @internal
-INFISICAL_PROJECT_ID=
-# @internal
-INFISICAL_ENVIRONMENT=
-# @internal
-INFISICAL_SITE_URL=
-# @type=infisicalClientId @internal
-INFISICAL_CLIENT_ID=
-# @type=infisicalClientSecret @sensitive @internal
-INFISICAL_CLIENT_SECRET=
+INFISICAL_SITE_URL=https://<trusted-tailnet-host>:<port>
+INFISICAL_PROJECT_ID=<project id>
+INFISICAL_CLIENT_ID=<runtime identity client id>
+INFISICAL_CLIENT_SECRET=<runtime identity client secret>
 
 BLIZZARD_CLIENT_ID=infisical()
 BLIZZARD_CLIENT_SECRET=infisical()
+GOOGLE_SERVICE_ACCOUNT_JSON=infisical()
+GOOGLE_SPREADSHEET_ID=infisical()
+GOOGLE_SERVICE_ACCOUNT_FILE=
 ```
 
-Use the selected project/environment/path above for production; confirm any separate development scope with the homelab owner. Keep `DISCORD_MAP_FILE` local; a secret store does not need to hold the mapping or public workbook. For Google, prefer an injected short-lived token or a privately delivered service-account file over embedding JSON keys into public schema defaults.
+`INFISICAL_*` items are `@internal`: Varlock uses them to authenticate but does not pass them to the app process. Keep `.env.local` at mode 0600.
 
-Validate a scoped read with Varlock and run a guild refresh on the trusted runner. Confirm log redaction, no bootstrap secret reaches the app, restrictive local permissions, rotation, revocation and failure behavior. Resolver authentication/network errors must fail visibly, without silently falling back to stale local credentials. Remove migrated app values from `.env.local` and rotate superseded credentials after confirming the new path.
+Then run `just env-check` (values stay redacted) and `just refresh`. A resolver failure (network, TLS, authentication, permission or a missing key) makes Varlock report the invalid item and stop before the app starts. There is deliberately no fallback to local values, so a broken secret path cannot silently use stale credentials.
 
-Keep offline tests/demo free of network-bound resolvers: use local file mode or an explicitly isolated test schema. Do not make public CI depend on private homelab connectivity. Any caching/frozen-environment design needs an explicit expiry, private storage, and visible freshness semantics; it is not enabled by this project.
+## Requirements and cutover
 
-An existing Infisical CLI deployment can instead inject values into `varlock run`, preserving Varlock validation/redaction, if that is the homelab's maintained interface. Neither mechanism needs application source changes. Do not add two independent secret resolvers to the app.
+- Use the instance's trusted HTTPS endpoint on the tailnet. Do not disable TLS verification or expose the instance publicly for this CLI.
+- Keep Universal Auth access-token lifetimes short (the homelab guidance targets 15 minutes or less) and keep development and production access separate.
+- Confirm a scoped read with `just env-check`, then a guild refresh and, if needed, a Sheets publish.
+- Only then remove the migrated values and local key files (`.local/google-service-account.json`, staged handoff copies), and consider rotating superseded credentials.
+- Keep offline tests and the demo free of network-bound resolvers. Public CI must never depend on private homelab connectivity.
+- Do not add a second secret resolver, such as an Infisical CLI wrapper around `varlock run`, alongside the plugin.

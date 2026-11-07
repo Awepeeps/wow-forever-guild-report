@@ -113,19 +113,37 @@ export function preservedNotes(
   return result;
 }
 
+async function serviceAccount(
+  env: NodeJS.ProcessEnv,
+): Promise<z.infer<typeof serviceAccountSchema>> {
+  // Inline JSON lets a secret store inject the key without a file on disk.
+  if (env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    } catch {
+      throw new SafeError("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.");
+    }
+    const parsed = serviceAccountSchema.safeParse(raw);
+    if (!parsed.success)
+      throw new SafeError(
+        "GOOGLE_SERVICE_ACCOUNT_JSON must contain client_email and private_key.",
+      );
+    return parsed.data;
+  }
+  if (env.GOOGLE_SERVICE_ACCOUNT_FILE)
+    return readJson(env.GOOGLE_SERVICE_ACCOUNT_FILE, serviceAccountSchema);
+  throw new SafeError(
+    "Set GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_SERVICE_ACCOUNT_FILE or GOOGLE_ACCESS_TOKEN in Varlock configuration.",
+  );
+}
+
 export async function googleToken(
   env: NodeJS.ProcessEnv,
   http = new HttpClient(),
 ): Promise<string> {
   if (env.GOOGLE_ACCESS_TOKEN) return env.GOOGLE_ACCESS_TOKEN;
-  if (!env.GOOGLE_SERVICE_ACCOUNT_FILE)
-    throw new SafeError(
-      "Set GOOGLE_SERVICE_ACCOUNT_FILE or GOOGLE_ACCESS_TOKEN in Varlock configuration.",
-    );
-  const account = await readJson(
-    env.GOOGLE_SERVICE_ACCOUNT_FILE,
-    serviceAccountSchema,
-  );
+  const account = await serviceAccount(env);
   const now = Math.floor(Date.now() / 1000);
   const b64 = (v: unknown) =>
     Buffer.from(JSON.stringify(v)).toString("base64url");

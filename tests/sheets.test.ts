@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { generateKeyPairSync } from "node:crypto";
 import { HttpClient } from "../src/http.ts";
 import {
   googleToken,
@@ -170,4 +171,41 @@ test("Google credentials are command-specific and short-lived OAuth tokens can b
   expect(
     await googleToken({ GOOGLE_ACCESS_TOKEN: "temporary-test-token" }),
   ).toBe("temporary-test-token");
+});
+
+test("an inline service-account key mints a token and malformed keys never echo their content", async () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const bodies: string[] = [];
+  const http = new HttpClient(async (_input, init) => {
+    bodies.push(String(init?.body));
+    return Response.json({ access_token: "minted-test-token" });
+  });
+  const key = JSON.stringify({
+    client_email: "robot@example.iam.gserviceaccount.com",
+    private_key: pem,
+  });
+  expect(
+    await googleToken(
+      {
+        GOOGLE_SERVICE_ACCOUNT_JSON: key,
+        GOOGLE_SERVICE_ACCOUNT_FILE: "/nonexistent/should-not-be-read.json",
+      },
+      http,
+    ),
+  ).toBe("minted-test-token");
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toContain("grant_type=");
+  expect(bodies[0]).not.toContain("PRIVATE KEY");
+
+  const secretish = "not-json-but-secret-material";
+  const bad = googleToken({ GOOGLE_SERVICE_ACCOUNT_JSON: secretish }, http);
+  await expect(bad).rejects.toThrow("not valid JSON");
+  await expect(bad).rejects.not.toThrow(secretish);
+  await expect(
+    googleToken(
+      { GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify({ private_key: pem }) },
+      http,
+    ),
+  ).rejects.toThrow("client_email and private_key");
 });

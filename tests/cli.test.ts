@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { snapshotSchema } from "../src/model.ts";
@@ -9,8 +9,16 @@ const root = resolve(import.meta.dir, "..");
 async function run(
   directory: string,
   args: string[],
-  environment: Record<string, string> = {},
+  // `undefined` removes a variable so a test's .env.local supplies it instead.
+  environment: Record<string, string | undefined> = {},
 ) {
+  // The schema loads a Varlock plugin; resolve it from the repo's installed packages.
+  await symlink(
+    join(root, "node_modules"),
+    join(directory, "node_modules"),
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "EEXIST") throw error;
+  });
   const proc = Bun.spawn(
     [
       join(root, "node_modules/.bin/varlock"),
@@ -22,16 +30,23 @@ async function run(
     ],
     {
       cwd: directory,
-      env: {
-        ...process.env,
-        BLIZZARD_CLIENT_ID: "",
-        BLIZZARD_CLIENT_SECRET: "",
-        GOOGLE_ACCESS_TOKEN: "",
-        GOOGLE_SERVICE_ACCOUNT_FILE: "",
-        GOOGLE_SPREADSHEET_ID: "",
-        DISCORD_MAP_FILE: "",
-        ...environment,
-      },
+      env: Object.fromEntries(
+        Object.entries({
+          ...process.env,
+          BLIZZARD_CLIENT_ID: "",
+          BLIZZARD_CLIENT_SECRET: "",
+          GOOGLE_ACCESS_TOKEN: "",
+          GOOGLE_SERVICE_ACCOUNT_FILE: "",
+          GOOGLE_SERVICE_ACCOUNT_JSON: "",
+          GOOGLE_SPREADSHEET_ID: "",
+          INFISICAL_SITE_URL: "",
+          INFISICAL_PROJECT_ID: "",
+          INFISICAL_CLIENT_ID: "",
+          INFISICAL_CLIENT_SECRET: "",
+          DISCORD_MAP_FILE: "",
+          ...environment,
+        }).filter(([, value]) => value !== undefined),
+      ),
       stdout: "pipe",
       stderr: "pipe",
     },
@@ -162,6 +177,48 @@ test("real import ignores Notes, creates sibling map, and refuses an overwrite",
     const rerun = await run(directory, args);
     expect(rerun.code).toBe(1);
     expect(rerun.stderr).toContain("already exists");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("an unreachable Infisical source fails closed without starting the app or echoing bootstrap secrets", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "roster-infisical-"));
+  try {
+    await Bun.write(
+      join(directory, ".env.schema"),
+      Bun.file(join(root, ".env.schema")),
+    );
+    const bootstrapSecret = "bootstrap-secret-must-not-print";
+    await Bun.write(
+      join(directory, ".env.local"),
+      [
+        "INFISICAL_SITE_URL=https://127.0.0.1:9",
+        "INFISICAL_PROJECT_ID=00000000-0000-0000-0000-000000000000",
+        "INFISICAL_CLIENT_ID=test-client-id",
+        `INFISICAL_CLIENT_SECRET=${bootstrapSecret}`,
+        "BLIZZARD_CLIENT_ID=infisical()",
+        "BLIZZARD_CLIENT_SECRET=local-value-must-not-be-used",
+        "",
+      ].join("\n"),
+    );
+    const out = join(directory, "output");
+    const result = await run(
+      directory,
+      ["export", "--config", join(root, "examples/roster.json"), "--out", out],
+      {
+        INFISICAL_SITE_URL: undefined,
+        INFISICAL_PROJECT_ID: undefined,
+        INFISICAL_CLIENT_ID: undefined,
+        INFISICAL_CLIENT_SECRET: undefined,
+        BLIZZARD_CLIENT_ID: undefined,
+        BLIZZARD_CLIENT_SECRET: undefined,
+      },
+    );
+    expect(result.code).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain("BLIZZARD_CLIENT_ID");
+    expect(`${result.stdout}${result.stderr}`).not.toContain(bootstrapSecret);
+    expect(await Bun.file(join(out, "snapshot.json")).exists()).toBe(false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

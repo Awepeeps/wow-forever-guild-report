@@ -97,7 +97,7 @@ Guild Info and Characters show **Generated At** in UTC. **Fetched At** is the re
 
 Excel/CSV import works without Google credentials. For repeatable direct updates, create a **new empty spreadsheet**, enable the Google Sheets API in your Google Cloud project, and either:
 
-1. Create a service account, save its JSON key under `.local/`, and share the spreadsheet with its email as **Editor**. Set `GOOGLE_SERVICE_ACCOUNT_FILE=.local/google-service-account.json`.
+1. Create a service account, save its JSON key under `.local/`, and share the spreadsheet with its email as **Editor**. Set `GOOGLE_SERVICE_ACCOUNT_FILE=.local/google-service-account.json`, or provide the key as one-line JSON in `GOOGLE_SERVICE_ACCOUNT_JSON` (for example from Infisical), which takes precedence.
 2. Inject a short-lived OAuth token with the `https://www.googleapis.com/auth/spreadsheets` scope as `GOOGLE_ACCESS_TOKEN`. This takes precedence over the service account file.
 
 Set `GOOGLE_SPREADSHEET_ID` to the ID in the sheet URL, then run:
@@ -134,7 +134,7 @@ The importer derives candidate slugs from full names; check them against the act
 
 Blizzard and Google secrets are optional in the shared schema so offline exports/checks work without credentials. Commands validate their own required credentials. `just env-check` validates supplied values; it is not a live authentication test. Do not use Varlock reveal/export commands in captured logs.
 
-See [Infisical migration](docs/infisical.md) for moving the same config contract to a self-hosted provider. No infrastructure is provisioned by this project.
+A machine can load the same values from self-hosted Infisical instead; see [Loading secrets from Infisical](docs/infisical.md). It is opt-in through the private `.env.local`, fails closed and never runs in CI. No infrastructure is provisioned by this project.
 
 ## Engineering checks
 
