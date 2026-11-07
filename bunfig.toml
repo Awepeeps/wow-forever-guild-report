@@ -1,0 +1,8 @@
+env = false
+
+[install]
+exact = true
+
+[test]
+root = "tests"
+coveragePathIgnorePatterns = ["**/tests/**", "**/src/cli.ts"]

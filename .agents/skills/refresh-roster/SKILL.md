@@ -1,0 +1,19 @@
+---
+
+name: refresh-roster
+description: Import a WoW Forever roster CSV, maintain private Discord mappings, refresh a guild workbook, or publish an explicitly requested Google Sheets update in this repository.
+---
+
+Use `just` and the schemas in `src/model.ts`; read README for command arguments. Keep local data under `.local/` and output under `output/`. Do not echo config/map contents or raw API responses.
+
+For guild refreshes, take region/guild slug from the supplied Forever guild URL. The guild roster is authoritative; use explicit characters only when requested. Resolve Discord from the ignored JSON map; `region:id:ID` keys take precedence over `region:slug`. Never infer a Discord identity from a similar name.
+
+Use `just import-csv` to migrate the original CSV into a fresh private directory. It omits Notes and planned specs. Point `DISCORD_MAP_FILE` at the imported mapping, then refresh using the guild config. Preserve the original CSV privately if the user needs its notes later.
+
+Use `just refresh`; exit 2 writes partial data with status/last-success timestamps. Explain incomplete components instead of claiming a complete refresh. Auth/guild failures exit 1 and must not lead to publishing an empty roster. `just export` is an offline supplied-data export and does not discover guild members.
+
+Credentials must arrive through the environment/Varlock or the host's secure secret-input facility. Do not request credentials in chat. No live credentials are needed for `just demo` or CI.
+
+Publish via `just sheets` only when the current task requests a Google write. It creates/updates owned tabs and preserves Notes by identity. On ownership or note-preservation errors, keep the existing sheet intact; use a new spreadsheet or let the user archive the affected notes. An ambiguous Google write failure requires inspecting the actual outcome before another write.
+
+Report artifact paths, character counts, generation time, and remaining API limitations. Never publish Discord mappings or full roster exports in a PR.
