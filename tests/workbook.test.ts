@@ -43,7 +43,7 @@ test("workbook has first Characters/Guild Info tabs, real numeric cells, frozen 
     "Characters",
     "Guild Info",
     "Professions",
-    "Reference Info",
+    "Data Notes",
   ]);
   expect(tables[0]?.rows[1]).toContain(snapshot.generatedAt);
   expect(tables[0]?.rows[0]).toContain("Guild Rank");

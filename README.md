@@ -19,12 +19,12 @@ just demo        # synthetic data, no credentials/network API access
 
 Open `output/demo/roster.xlsx` in Excel, LibreOffice, or Google Sheets. It has frozen headers and filters:
 
-| Tab            | Contents                                                                                                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Characters     | Discord, name, ruleset, class, faction, race, level, guild rank, talent points, professions/levels, Notes, status and freshness |
-| Guild Info     | Guild, region, generation timestamp, counts by class/faction/ruleset, mapping and API availability                              |
-| Professions    | One row per character/profession/tier, including all secondaries and skill/max                                                  |
-| Reference Info | Interpretation, source links, API limitations                                                                                   |
+| Tab         | Contents                                                                                                                        |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Characters  | Discord, name, ruleset, class, faction, race, level, guild rank, talent points, professions/levels, Notes, status and freshness |
+| Guild Info  | Guild, region, generation timestamp, counts by class/faction/ruleset, mapping and API availability                              |
+| Professions | One row per character/profession/tier, including all secondaries and skill/max                                                  |
+| Data Notes  | How to read the generated data: identity, freshness, source links, API limitations                                              |
 
 Each export also includes four CSV files and `snapshot.json`. Offline `just export` defaults to `output/export/`; API `just refresh` defaults to `output/roster/`. Offline export refuses to replace a snapshot containing API statuses, even with an explicit output path. Characters sort by **Discord name, then character name, with unmapped characters last**; ties use the API slug. Names compare in English with case-insensitive grouping and deterministic case ties. API return order does not affect the workbook.
 
@@ -106,7 +106,7 @@ Set `GOOGLE_SPREADSHEET_ID` to the ID in the sheet URL, then run:
 just sheets     # publish output/roster/snapshot.json
 ```
 
-The tool creates Characters, Guild Info, Professions, and Reference Info with ownership metadata and places them first in that order. Later updates replace only those owned tabs in a single atomic Google batch. An existing tab with the same name but no ownership marker is refused: **the original example spreadsheet is never taken over**. Other tabs keep their contents. Don't remove the ownership metadata or change the generated identity/header columns.
+The tool creates Characters, Guild Info, Professions, and Data Notes with ownership metadata and places them first in that order. Later updates replace only those owned tabs in a single atomic Google batch. An existing tab with the same name but no ownership marker is refused before any write: **human tabs are never taken over**. To add generated tabs to an existing hand-maintained spreadsheet, first rename its clashing tabs (for example `Characters (old)`). Other tabs keep their contents. Don't remove the ownership metadata or change the generated identity/header columns.
 
 **Notes belongs to humans.** CSV/API imports never read Notes, and local exports leave that column blank. In managed Google Sheets, existing Notes cell values are carried by region + character identity when rows reorder. If a departing/unidentified character has Notes, publishing stops before changing the sheet; archive the note elsewhere and clear the old cell before retrying. Avoid editing Notes during publishing: the Sheets API has no compare-and-swap for concurrent cell edits. Keep long-term freeform notes in a separate human-owned tab if you need independent editing.
 

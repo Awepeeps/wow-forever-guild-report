@@ -195,7 +195,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     { name: "Characters", rows: characters },
     { name: "Guild Info", rows: guild },
     { name: "Professions", rows: professions },
-    { name: "Reference Info", rows: reference },
+    { name: "Data Notes", rows: reference },
   ];
 }
 
