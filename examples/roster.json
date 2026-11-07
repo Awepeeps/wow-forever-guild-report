@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "region": "us",
+  "characters": [
+    {
+      "slug": "example-priest",
+      "name": "Example Priest",
+      "ruleset": "Roleplay",
+      "class": "Priest",
+      "faction": "Alliance",
+      "race": "Skyborne",
+      "level": 17,
+      "guildRank": 2,
+      "talents": [
+        { "tree": "Shadow Magic", "points": 5 },
+        { "tree": "Discipline", "points": 2 }
+      ],
+      "primary": [
+        { "name": "Alchemy", "skill": 72, "max": 150 },
+        { "name": "Herbalism", "skill": 81, "max": 150 }
+      ],
+      "secondary": [
+        { "name": "Cooking", "skill": 20, "max": 75 },
+        { "name": "Fishing", "skill": 14, "max": 75 },
+        { "name": "First Aid", "skill": 30, "max": 75 }
+      ]
+    }
+  ]
+}

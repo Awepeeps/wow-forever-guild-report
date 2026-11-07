@@ -1,0 +1,8 @@
+title = "WoW Forever Guild Report secret detection"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Local runtime data and installed dependencies are outside the publication surface"
+paths = ['''(^|/)(node_modules|\.local|output|coverage|dist|\.git)/''', '''(^|/)\.env(\.local|\.development|\.production)?$''']

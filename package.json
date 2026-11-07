@@ -1,0 +1,30 @@
+{
+  "name": "wow-forever-guild-report",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API-driven WoW Forever profession roster workbooks",
+  "engines": {
+    "bun": ">=1.4.3"
+  },
+  "packageManager": "bun@1.4.3",
+  "scripts": {
+    "cli": "varlock run -- bun src/cli.ts",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --coverage",
+    "audit": "bun audit --audit-level=high"
+  },
+  "dependencies": {
+    "csv-parse": "7.0.3",
+    "fflate": "0.8.3",
+    "varlock": "1.24.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2"
+  }
+}

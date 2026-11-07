@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+!.env.schema
+!.env.example
+.local/
+output/
+coverage/
+dist/
+*.log
+*.pem
+*.key
+*credentials*.json
+!.github/
