@@ -11,6 +11,7 @@ import {
 } from "./dates.ts";
 import {
   armoryUrl,
+  guildArmoryUrl,
   type ItemLinkList,
   itemUrl,
   type PublicLink,
@@ -272,6 +273,9 @@ export function buildTables(snapshot: Snapshot): Table[] {
   const guild: Cell[][] = [
     ["Metric", "Value"],
     ["Guild", snapshot.guild ?? "Explicit character roster"],
+    ...(snapshot.guild
+      ? [["Source Guild URL", guildArmoryUrl(snapshot.region, snapshot.guild)]]
+      : []),
     ["Region", snapshot.region],
     ["Generated At", snapshot.generatedAt],
     [
@@ -483,7 +487,19 @@ export function buildTables(snapshot: Snapshot): Table[] {
         ...craftedItemLinks,
       ],
     },
-    { name: "Guild Info", rows: guild },
+    {
+      name: "Guild Info",
+      rows: guild,
+      links: snapshot.guild
+        ? [
+            {
+              row: 2,
+              column: 1,
+              url: guildArmoryUrl(snapshot.region, snapshot.guild),
+            },
+          ]
+        : [],
+    },
     {
       name: "Automated Export Info",
       rows: reference,
