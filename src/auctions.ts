@@ -90,9 +90,8 @@ export async function refreshAuctionPrices(
 export function auctionSnapshotAt(snapshot: Snapshot): string | undefined {
   const data = snapshot.auctionPrices?.data;
   if (!data?.auctionsUpdatedAt || !data.commoditiesUpdatedAt) return undefined;
-  return data.auctionsUpdatedAt < data.commoditiesUpdatedAt
-    ? data.auctionsUpdatedAt
-    : data.commoditiesUpdatedAt;
+  // Both are normalized ISO-8601 UTC strings, so lexical order is time order.
+  return [data.auctionsUpdatedAt, data.commoditiesUpdatedAt].sort()[0];
 }
 
 export function auctionStatus(snapshot: Snapshot): string {
@@ -123,6 +122,12 @@ export function money(copper: number): string {
     .join(" ");
 }
 
+export function signedMoney(copper: number): string {
+  const rounded = Math.round(copper * 100) / 100;
+  if (rounded === 0) return "±0c";
+  return `${rounded > 0 ? "+" : "−"}${money(Math.abs(rounded))}`;
+}
+
 export function recipePrices(
   snapshot: Snapshot,
   details: RecipeDetails | undefined,
@@ -132,6 +137,9 @@ export function recipePrices(
   outputCopper?: number;
   materialCopper?: number;
   outputQuantity?: number;
+  margin: string;
+  marginCopper?: number;
+  tone?: "gain" | "loss";
   status: string;
 } {
   const data = snapshot.auctionPrices?.data;
@@ -163,6 +171,27 @@ export function recipePrices(
       }
     }
   }
+  // Margin per craft: output value at the reported yield minus material cost.
+  // A variable yield gives a range; it is only colored when both ends agree.
+  let margin = "Unknown";
+  let marginCopper: number | undefined;
+  let tone: "gain" | "loss" | undefined;
+  if (output && materialCopper !== undefined && details?.quantity) {
+    const low = output.unitCopper * details.quantity.min - materialCopper,
+      high = output.unitCopper * details.quantity.max - materialCopper;
+    if (
+      Math.abs(low) <= Number.MAX_SAFE_INTEGER &&
+      Math.abs(high) <= Number.MAX_SAFE_INTEGER
+    ) {
+      const cents = (copper: number) => Math.round(copper * 100);
+      marginCopper = low;
+      margin =
+        low === high
+          ? signedMoney(low)
+          : `${signedMoney(low)} to ${signedMoney(high)}`;
+      tone = cents(low) > 0 ? "gain" : cents(high) < 0 ? "loss" : undefined;
+    }
+  }
   const incomplete = !output || materialCopper === undefined;
   const status = auctionStatus(snapshot);
   return {
@@ -177,6 +206,9 @@ export function recipePrices(
     ...(data && details?.output
       ? { outputQuantity: output?.quantity ?? 0 }
       : {}),
+    margin,
+    ...(marginCopper !== undefined ? { marginCopper } : {}),
+    ...(tone ? { tone } : {}),
     status: data && incomplete ? `${status}; some prices unavailable` : status,
   };
 }

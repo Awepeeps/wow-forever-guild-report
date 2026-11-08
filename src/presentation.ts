@@ -91,6 +91,12 @@ export function playerGroups(
   return groups;
 }
 
+/** Readable profit/loss emphasis; the signed text stays the primary signal. */
+export const toneStyles = {
+  gain: { background: "E6F4EA", foreground: "137333" },
+  loss: { background: "FCE8E6", foreground: "A50E0E" },
+} as const;
+
 export function classStyle(name: string): {
   background: string;
   foreground: string;
@@ -151,6 +157,7 @@ export function columnPresentation(
     "Materials URLs",
     "Output AH Copper",
     "Materials AH Copper",
+    "AH Margin Copper",
     "Output AH Quantity",
     "Auction House ID",
     "Auction Last Success",
@@ -187,6 +194,7 @@ export function columnPresentation(
     "Recipe Details": 170,
     "Output AH / Item": 180,
     "Materials AH / Craft": 180,
+    "AH Margin / Craft": 170,
     "AH Data": 200,
     "AH Snapshot (UTC)": 185,
     "API Details": 260,

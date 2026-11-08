@@ -14,8 +14,9 @@ import {
   isPlayerNotesHeader,
   playerGroups,
   rgb,
+  toneStyles,
 } from "./presentation.ts";
-import type { Table } from "./workbook.ts";
+import { marginHeader, type Table, validatedTones } from "./workbook.ts";
 
 const serviceAccountSchema = z.object({
   client_email: z.email(),
@@ -447,6 +448,41 @@ export function sheetRequests(
               fields: "userEnteredFormat.backgroundColor",
             },
           });
+      // Rewrite every margin cell's format so stale colors never survive a row shift.
+      const marginColumn = table.rows[0]?.indexOf(marginHeader) ?? -1;
+      if (marginColumn >= 0) {
+        const tones = new Map(
+          validatedTones(table).map((t) => [t.row, t.tone]),
+        );
+        requests.push({
+          updateCells: {
+            start: { sheetId: id, rowIndex: 1, columnIndex: marginColumn },
+            rows: table.rows.slice(1).map((_, i) => {
+              const tone = tones.get(i + 1);
+              return {
+                values: [
+                  {
+                    userEnteredFormat: {
+                      backgroundColor: rgb(
+                        tone ? toneStyles[tone].background : "FFFFFF",
+                      ),
+                      textFormat: {
+                        foregroundColor: rgb(
+                          tone ? toneStyles[tone].foreground : "172B3A",
+                        ),
+                        bold: Boolean(tone),
+                      },
+                      wrapStrategy: "WRAP",
+                      verticalAlignment: "TOP",
+                    },
+                  },
+                ],
+              };
+            }),
+            fields: "userEnteredFormat",
+          },
+        });
+      }
       const classColumn = table.rows[0]?.indexOf("Class") ?? -1;
       if (classColumn >= 0)
         requests.push({
