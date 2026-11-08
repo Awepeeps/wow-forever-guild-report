@@ -41,16 +41,25 @@ import {
   exportHeader,
   playerGroups,
   playerNotesHeader,
+  toneStyles,
 } from "./presentation.ts";
 import { knowerChunks, knownRecipes, recipeCoverage } from "./recipes.ts";
 
 export type Cell = string | number;
+export const marginHeader = "AH Margin / Craft";
+/** Green/red emphasis for a signed value; never the only signal (text keeps its sign). */
+export interface CellTone {
+  row: number;
+  column: number;
+  tone: "gain" | "loss";
+}
 export interface Table {
   name: string;
   rows: Cell[][];
   links?: PublicLink[];
   itemLists?: ItemLinkList[];
   relativeDates?: RelativeDate[];
+  tones?: CellTone[];
 }
 
 export function buildTables(snapshot: Snapshot): Table[] {
@@ -209,6 +218,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
   }
   const recipeEntries = knownRecipes(snapshot);
   const recipeItemLists: ItemLinkList[] = [];
+  const recipeTones: CellTone[] = [];
   const craftedItemLinks: PublicLink[] = [];
   const recipes: Cell[][] = [
     [
@@ -221,6 +231,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Knower Data",
       "Output AH / Item",
       "Materials AH / Craft",
+      marginHeader,
       "AH Data",
       "AH Snapshot (UTC)",
       "Recipe ID",
@@ -236,6 +247,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Materials URLs",
       "Output AH Copper",
       "Materials AH Copper",
+      "AH Margin Copper",
       "Output AH Quantity",
       "Auction House ID",
       "Auction Last Success",
@@ -256,6 +268,12 @@ export function buildTables(snapshot: Snapshot): Table[] {
         : "Current reports";
     for (const chunk of knowerChunks(recipe.knowers)) {
       const row = recipes.length;
+      if (prices.tone)
+        recipeTones.push({
+          row,
+          column: recipes[0]?.indexOf(marginHeader) ?? -1,
+          tone: prices.tone,
+        });
       const output = details?.data?.output;
       const materials =
         details?.data?.reagents?.map((r) => ({
@@ -278,6 +296,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
         status,
         snapshot.auctionMarket ? prices.output : "Not configured",
         snapshot.auctionMarket ? prices.materialCost : "Not configured",
+        snapshot.auctionMarket ? prices.margin : "Not configured",
         prices.status,
         auctionSnapshotAt(snapshot) ??
           (snapshot.auctionMarket ? "Not provided" : ""),
@@ -294,6 +313,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
         materials.map((item) => item.url).join("\n"),
         prices.outputCopper ?? "",
         prices.materialCopper ?? "",
+        prices.marginCopper ?? "",
         prices.outputQuantity ?? "",
         snapshot.auctionMarket?.houseId ?? "",
         snapshot.auctionPrices?.fetchedAt ?? "",
@@ -485,7 +505,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Auction prices",
-      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; output prices also show buyout quantity listed. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote or profit: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times, fetch diagnostics and numeric copper values are hidden/available in CSV. Item-ID matching does not distinguish random bonuses.",
+      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; output prices also show buyout quantity listed. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield minus Materials AH / Craft (a range for variable yields), before the auction house cut and deposit; it is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times, fetch diagnostics and numeric copper values are hidden/available in CSV. Item-ID matching does not distinguish random bonuses.",
     ],
     [
       "Public links",
@@ -527,6 +547,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       name: "Recipes",
       rows: recipes,
       itemLists: recipeItemLists,
+      tones: recipeTones,
       links: [
         ...recipes
           .slice(1)
@@ -686,7 +707,27 @@ function xlsxItemColumns(table: Table): Table {
           })),
         }
       : {}),
+    ...(table.tones
+      ? {
+          tones: table.tones.map((tone) => ({
+            ...tone,
+            column: columns[tone.column] ?? tone.column,
+          })),
+        }
+      : {}),
   };
+}
+
+/** Tones only ever mark the generated margin column of data rows. */
+export function validatedTones(table: Table): CellTone[] {
+  const column = table.rows[0]?.indexOf(marginHeader) ?? -1;
+  return (table.tones ?? []).filter(
+    (tone) =>
+      tone.column === column &&
+      column >= 0 &&
+      tone.row >= 1 &&
+      tone.row < table.rows.length,
+  );
 }
 
 // XLSX and CSV are snapshots at Generated At. Excel has no portable viewer-UTC
@@ -734,9 +775,10 @@ export function toXlsx(tables: Table[]): Uint8Array {
     "xl/_rels/workbook.xml.rels",
     `<Relationships xmlns="${relns}">${tables.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
   );
+  const tones = ["gain", "loss"] as const;
   add(
     "xl/styles.xml",
-    `<styleSheet xmlns="${ns}"><fonts count="${3 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}<font><u/><color rgb="FF0563C1"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="${4 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${5 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}<xf numFmtId="0" fontId="0" fillId="${3 + classStyles.length}" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>${[0, 3 + classStyles.length].map((fill) => `<xf numFmtId="0" fontId="${2 + classStyles.length}" fillId="${fill}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
+    `<styleSheet xmlns="${ns}"><fonts count="${5 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}<font><u/><color rgb="FF0563C1"/><sz val="11"/><name val="Calibri"/></font>${tones.map((tone) => `<font><b/><color rgb="FF${toneStyles[tone].foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}</fonts><fills count="${6 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill>${tones.map((tone) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${toneStyles[tone].background}"/></patternFill></fill>`).join("")}</fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${7 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}<xf numFmtId="0" fontId="0" fillId="${3 + classStyles.length}" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>${[0, 3 + classStyles.length].map((fill) => `<xf numFmtId="0" fontId="${2 + classStyles.length}" fillId="${fill}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}${tones.map((_, t) => `<xf numFmtId="0" fontId="${3 + classStyles.length + t}" fillId="${4 + classStyles.length + t}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
   );
   tables.forEach((inputTable, i) => {
     const table = xlsxItemColumns(inputTable);
@@ -753,6 +795,9 @@ export function toXlsx(tables: Table[]): Uint8Array {
     const width = table.rows[0]?.length ?? 1;
     const last = `${column(width - 1)}${Math.max(1, table.rows.length)}`;
     const classColumn = table.rows[0]?.indexOf("Class") ?? -1;
+    const toneCells = new Map(
+      validatedTones(table).map((t) => [`${t.row}:${t.column}`, t.tone]),
+    );
     const frozen = ["Characters", "Professions"].includes(table.name);
     const shadedRows = new Set<number>();
     if (table.name === "Professions")
@@ -770,16 +815,20 @@ export function toXlsx(tables: Table[]): Uint8Array {
                 c === classColumn
                   ? classNames.indexOf(String(cell).trim().toLowerCase())
                   : -1;
+              const tone = toneCells.get(`${r}:${c}`);
               const style =
                 r === 0
                   ? 1
-                  : linkCells.has(`${r}:${c}`)
-                    ? (c < 2 && shadedRows.has(r) ? 4 : 3) + classStyles.length
-                    : c < 2 && shadedRows.has(r)
-                      ? 2 + classStyles.length
-                      : colorIndex < 0
-                        ? 0
-                        : colorIndex + 2;
+                  : tone
+                    ? 5 + classStyles.length + tones.indexOf(tone)
+                    : linkCells.has(`${r}:${c}`)
+                      ? (c < 2 && shadedRows.has(r) ? 4 : 3) +
+                        classStyles.length
+                      : c < 2 && shadedRows.has(r)
+                        ? 2 + classStyles.length
+                        : colorIndex < 0
+                          ? 0
+                          : colorIndex + 2;
               return `<c r="${column(c)}${r + 1}" s="${style}" t="${typeof output === "number" ? "n" : "inlineStr"}">${typeof output === "number" ? `<v>${output}</v>` : `<is><t xml:space="preserve">${xml(output)}</t></is>`}</c>`;
             })
             .join("")}</row>`,

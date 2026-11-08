@@ -427,3 +427,129 @@ test("price columns and linked material text stay literal in Sheets, CSV and XLS
       .join(""),
   ).not.toContain("<f>");
 });
+
+test("margin per craft uses the yield range, colors only an unambiguous gain or loss, and never colors unknowns", async () => {
+  const current = await refreshAuctionPrices(
+    input(),
+    { auctionPrices: async () => book },
+    undefined,
+    now,
+  );
+  // 1000c × 1–3 yield minus 2 × 37c materials.
+  expect(recipePrices(current, details)).toMatchObject({
+    margin: "+9s 26c to +29s 26c",
+    marginCopper: 926,
+    tone: "gain",
+  });
+  const fixed = { ...details, quantity: { min: 1, max: 1 } };
+  const priced = (items: AuctionBook["items"]) => ({
+    ...current,
+    auctionPrices: {
+      ...(current.auctionPrices ?? {
+        market,
+        status: "ok" as const,
+        attemptedAt: now.toISOString(),
+        fetchedAt: now.toISOString(),
+      }),
+      data: { ...book, items },
+    },
+  });
+  const loss = priced({
+    "7001": { unitCopper: 50, quantity: 8 },
+    "7002": { unitCopper: 37, quantity: 25 },
+  });
+  expect(recipePrices(loss, fixed)).toMatchObject({
+    margin: "−24c",
+    tone: "loss",
+  });
+  const even = priced({
+    "7001": { unitCopper: 74, quantity: 8 },
+    "7002": { unitCopper: 37, quantity: 25 },
+  });
+  expect(recipePrices(even, fixed).margin).toBe("±0c");
+  expect(recipePrices(even, fixed).tone).toBeUndefined();
+  // A range crossing zero keeps its sign in text but is not colored.
+  const mixed = priced({
+    "7001": { unitCopper: 50, quantity: 8 },
+    "7002": { unitCopper: 37, quantity: 25 },
+  });
+  expect(recipePrices(mixed, details)).toMatchObject({
+    margin: "−24c to +76c",
+  });
+  expect(recipePrices(mixed, details).tone).toBeUndefined();
+  for (const unknown of [
+    { ...details, quantity: undefined },
+    { ...details, reagents: undefined },
+  ]) {
+    expect(recipePrices(current, unknown).margin).toBe("Unknown");
+    expect(recipePrices(current, unknown).tone).toBeUndefined();
+  }
+  const noOutput = priced({ "7002": { unitCopper: 37, quantity: 25 } });
+  expect(recipePrices(noOutput, details).margin).toBe("Unknown");
+
+  // Sheets: every margin cell's format is rewritten; only gain/loss cells are colored.
+  const tables = buildTables(loss),
+    recipes = tables.find((t) => t.name === "Recipes");
+  if (!recipes) throw new Error("fixture");
+  const column = recipes.rows[0]?.indexOf("AH Margin / Craft") ?? -1;
+  expect(recipes.rows[1]?.[column]).toBe("−24c to +76c");
+  expect(recipes.tones ?? []).toEqual([]);
+  const gainTables = buildTables(current),
+    gain = gainTables.find((t) => t.name === "Recipes");
+  expect(gain?.tones).toEqual([{ row: 1, column, tone: "gain" }]);
+  const requests = sheetRequests(gainTables, []) as {
+    updateCells?: {
+      start?: { columnIndex: number; rowIndex: number };
+      fields: string;
+      rows: {
+        values: { userEnteredFormat?: { backgroundColor?: unknown } }[];
+      }[];
+    };
+  }[];
+  const margin = requests.find(
+    (r) =>
+      r.updateCells?.start?.columnIndex === column &&
+      r.updateCells.fields === "userEnteredFormat",
+  )?.updateCells;
+  expect(margin?.start?.rowIndex).toBe(1);
+  expect(margin?.rows).toHaveLength(1);
+  expect(
+    margin?.rows[0]?.values[0]?.userEnteredFormat?.backgroundColor,
+  ).toEqual({
+    red: 0xe6 / 255,
+    green: 0xf4 / 255,
+    blue: 0xea / 255,
+  });
+  expect(JSON.stringify(requests)).not.toContain("formulaValue");
+
+  // XLSX: the toned cell uses a dedicated style whose fill is the gain color.
+  const files = unzipSync(toXlsx(gainTables));
+  const styles = strFromU8(files["xl/styles.xml"] ?? new Uint8Array());
+  const sheet = strFromU8(
+    files["xl/worksheets/sheet3.xml"] ?? new Uint8Array(),
+  );
+  const cell = sheet.match(
+    /<c r="[A-Z]+2" s="(\d+)" t="inlineStr"><is><t xml:space="preserve">\+9s 26c to \+29s 26c<\/t>/,
+  );
+  const xfs = [
+    ...styles.matchAll(/<xf numFmtId="0" fontId="\d+" fillId="(\d+)"/g),
+  ].map((m) => Number(m[1]));
+  const fills = [...styles.matchAll(/<fill>(.*?)<\/fill>/g)].map((m) => m[1]);
+  // cellXfs follow the single cellStyleXfs entry.
+  const fill = fills[xfs[Number(cell?.[1]) + 1] ?? -1];
+  expect(fill).toContain("FFE6F4EA");
+  expect(styles).toMatch(/<cellXfs count="(\d+)">/);
+  const declared = Number(styles.match(/<cellXfs count="(\d+)">/)?.[1]);
+  expect((styles.split("<cellXfs")[1]?.match(/<xf /g) ?? []).length).toBe(
+    declared,
+  );
+  for (const tag of ["fonts", "fills"]) {
+    const count = Number(
+      styles.match(new RegExp(`<${tag} count="(\\d+)">`))?.[1],
+    );
+    const inner = styles.split(`<${tag} count`)[1]?.split(`</${tag}>`)[0] ?? "";
+    expect(
+      (inner.match(new RegExp(`<${tag.slice(0, -1)}>`, "g")) ?? []).length,
+    ).toBe(count);
+  }
+});
