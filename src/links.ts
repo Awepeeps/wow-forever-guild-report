@@ -14,6 +14,10 @@ export function armoryUrl(region: string, slug: string): string {
   return `https://worldofwarcraft.blizzard.com/en-us/forever/${regionSchema.parse(region)}/armory/character/${encodeURIComponent(slugSchema.parse(slug))}`;
 }
 
+export function guildArmoryUrl(region: string, slug: string): string {
+  return `https://worldofwarcraft.blizzard.com/en-us/forever/${regionSchema.parse(region)}/armory/guild/${encodeURIComponent(slugSchema.parse(slug))}`;
+}
+
 // Only a mapped Spell ID belongs here; a Blizzard recipe ID is a different ID space.
 export function recipeUrl(spellId: number): string {
   return `https://www.wowhead.com/forever/spell=${spellIdSchema.parse(spellId)}`;
@@ -44,7 +48,7 @@ export function assertPublicLink(value: string): void {
         parts[2] === "forever" &&
         regionSchema.safeParse(parts[3]).success &&
         parts[4] === "armory" &&
-        parts[5] === "character" &&
+        ["character", "guild"].includes(parts[5] ?? "") &&
         slugSchema.safeParse(decodeURIComponent(parts[6] ?? "")).success
       )
         return;

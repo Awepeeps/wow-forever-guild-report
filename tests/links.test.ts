@@ -4,6 +4,7 @@ import { HttpClient } from "../src/http.ts";
 import {
   armoryUrl,
   assertPublicLink,
+  guildArmoryUrl,
   itemUrl,
   recipeUrl,
   upstreamRepositoryUrl,
@@ -28,6 +29,13 @@ test("public links use encoded Forever slugs and validated Wowhead spell IDs", (
   for (const id of [-1, 0, 1.5, Number.NaN, 2_147_483_648])
     expect(() => itemUrl(id)).toThrow();
   expect(() => assertPublicLink(upstreamRepositoryUrl)).not.toThrow();
+  expect(guildArmoryUrl("us", "example-guild")).toBe(
+    "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/guild/example-guild",
+  );
+  expect(() =>
+    assertPublicLink(guildArmoryUrl("eu", "élise-o’neil")),
+  ).not.toThrow();
+  expect(() => guildArmoryUrl("us", "../private")).toThrow();
   expect(() => assertPublicLink(armoryUrl("eu", "élise-o’neil"))).not.toThrow();
   for (const target of [
     "javascript:alert(1)",
@@ -51,6 +59,9 @@ test("public links use encoded Forever slugs and validated Wowhead spell IDs", (
     "https://www.wowhead.com/forever/item=73001#private",
     "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/character/example/talents",
     "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/character/%2fprivate",
+    "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/guild/%2fprivate",
+    "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/guild/example-guild/roster",
+    "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/guild/example-guild?token=private",
     "https://www.wowhead.com/forever/search?q=Example#private",
   ])
     expect(() => assertPublicLink(target)).toThrow("allowed public");
@@ -82,6 +93,14 @@ test("XLSX hyperlinks are validated relationships, CSV keeps URLs, and Sheets li
     ),
   );
   const files = unzipSync(toXlsx(tables));
+  const guildUrl = guildArmoryUrl(snapshot.region, "example-guild");
+  const guild = tables.find((t) => t.name === "Guild Info");
+  expect(guild?.rows).toContainEqual(["Source Guild URL", guildUrl]);
+  expect(toCsv(guild?.rows ?? [])).toContain(guildUrl);
+  const guildLinks = strFromU8(
+    files["xl/worksheets/_rels/sheet4.xml.rels"] ?? new Uint8Array(),
+  );
+  expect(guildLinks).toContain(`Target="${guildUrl}"`);
   const sourceLinks = strFromU8(
     files["xl/worksheets/_rels/sheet5.xml.rels"] ?? new Uint8Array(),
   );
@@ -112,6 +131,15 @@ test("XLSX hyperlinks are validated relationships, CSV keeps URLs, and Sheets li
     '"link":{"uri":"https://www.wowhead.com/forever/spell=72001',
   );
   expect(body).not.toContain("formulaValue");
+  expect(body).toContain(`"link":{"uri":"${guildUrl}"}`);
+});
+
+test("explicit character rosters do not invent a source guild link", () => {
+  const guild = buildTables({ ...snapshot, guild: null }).find(
+    (t) => t.name === "Guild Info",
+  );
+  expect(guild?.rows.some((row) => row[0] === "Source Guild URL")).toBe(false);
+  expect(guild?.links).toEqual([]);
 });
 
 test("untrusted links, duplicate cells and links into human Notes fail before a Sheets write", async () => {
