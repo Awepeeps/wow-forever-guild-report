@@ -1,6 +1,6 @@
 # WoW Forever Guild Report
 
-Build a guild roster workbook from Blizzard's API. Discover every guild member, map characters to Discord names in private JSON, and refresh character levels, guild ranks, talent-tree point spend, primary profession levels, and secondary professions.
+Build a guild roster workbook from Blizzard's API. Discover every guild member, map characters to Discord names in private JSON, and refresh character levels, guild ranks, talent-tree point spend, item levels, last login, achievement points, XP, primary/secondary profession levels and known recipes.
 
 TypeScript on Bun, with `just` as the command interface and Varlock for configuration. No Armory scraping, Discord bot, account password, or web server.
 
@@ -19,12 +19,13 @@ just demo        # synthetic data, no credentials/network API access
 
 Open `output/demo/roster.xlsx` in Excel, LibreOffice, or Google Sheets. It has frozen headers and filters:
 
-| Tab                   | Contents                                                                                               |
-| --------------------- | ------------------------------------------------------------------------------------------------------ |
-| Characters            | Discord, character, class, level, guild rank label, talent points, API status, Player Notes (Editable) |
-| Professions           | One row per character: primary professions, secondary professions, status, Player Notes (Editable)     |
-| Guild Info            | Guild, region, generation timestamp, class/faction/ruleset counts and API availability                 |
-| Automated Export Info | Layout, class colors, identity, freshness, source links and API limitations                            |
+| Tab                   | Contents                                                                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Characters            | Discord, character, class, level, guild rank, equipped ilvl, last login, achievements, XP, talents, API status, Player Notes (Editable) |
+| Professions           | One row per character: primary professions, secondary professions, status, Player Notes (Editable)                                      |
+| Recipes               | Profession, recipe, known characters/Discord and retained-data status                                                                   |
+| Guild Info            | Guild, region, generation timestamp, class/faction/ruleset counts and API availability                                                  |
+| Automated Export Info | Layout, class colors, identity, freshness, source links and API limitations                                                             |
 
 Characters and Professions sit side by side, with Discord/name columns frozen. Both sort by **numeric guild rank, then Discord name, then character name**. Unknown ranks come last; within each rank, unmapped Discord entries come last. Names compare in English with case-insensitive grouping and deterministic case ties; the API slug breaks remaining ties. API return order does not affect the workbook, including when rendering an older snapshot.
 
@@ -32,7 +33,7 @@ Professions shades contiguous runs of the same Discord player on the name column
 
 Class cells use recognizable WoW colors with contrasting text; Priest uses light gray. Guild Info shows the export timestamp. Race, faction, ruleset, numeric rank, identity, repeated generation times and component diagnostics remain in hidden columns that can be unhidden. CSV files include every column.
 
-Each export includes four CSV files and `snapshot.json`. Offline `just export` defaults to `output/export/`; API `just refresh` defaults to `output/roster/`. Offline export refuses to replace a snapshot containing API statuses, even with an explicit output path.
+Each export includes five CSV files and `snapshot.json`. Offline `just export` defaults to `output/export/`; API `just refresh` defaults to `output/roster/`. Offline export refuses to replace a snapshot containing API statuses, even with an explicit output path.
 
 ## Configure your guild
 
@@ -100,6 +101,16 @@ The live US guild/profile and roster APIs were checked on 2026-11-07: ranks are 
 
 Guild Info shows **Generated At** in UTC; repeated generation times on Characters and Professions are hidden by default. **Fetched At** is the refresh attempt time; per-component **Last Success** columns indicate when retained data was last retrieved successfully. These timestamps describe this tool's fetches, not Blizzard's underlying update time. Blizzard profiles can lag until logout. Failed requests retain prior values, with failure status and the prior last-success timestamp.
 
+## Character metrics and recipe lookup
+
+Characters includes equipped item level, API-reported Last Login (UTC), achievement points and XP. Average item level is retained in a hidden column. Blank means unknown; zero remains zero. Last login is Blizzard's timestamp, which can lag, rather than this tool's fetch time. XP is the raw `experience` field; the API does not establish lifetime experience or the next-level requirement. A failed profile retains prior metrics with the old Profile Last Success; a successful profile that omits a metric clears it to unknown.
+
+Recipes sits immediately after Professions. It lists profession, recipe and known characters with their Discord names, sorted by profession then recipe name and ID. Knowers use the roster's rank/Discord/name order. Recipe IDs distinguish equal names; a character knowing the same recipe in several tiers appears once. Large knower lists continue on the next row to stay within Excel's cell limit. This sheet is generated, with no editable notes column.
+
+Failed profession calls retain recipe knowledge with a per-character last-success label. Manual knowledge is labelled separately. Missing `known_recipes` arrays mean **unknown coverage**, whereas empty arrays mean no recipes returned for that tier. Guild Info reports current full-coverage characters versus the roster total; Professions has a hidden Recipe Coverage column for Current/Partial/Unknown/Retained/Manual. Knower Data describes the listed knowers only; Current reports does not imply complete guild coverage. A successful response with no professions counts as current empty knowledge. XLSX row heights are capped, so inspect full cell text for unusually long knower lists. The lookup contains only known recipes returned by the API, not a complete recipe catalogue, so absence never proves nobody in the guild knows a recipe. Old snapshots still render, with unknown recipe coverage until refreshed.
+
+Character names on both roster tabs link to the main Forever Armory page for talent drill-down. Recipe names link to a **Wowhead Forever name search**. Blizzard recipe IDs are SkillLineAbility IDs, not Wowhead spell IDs; exact spell links need a separate verified mapping and are not guessed. The main Armory route and Wowhead search route were verified from public sources on 2026-11-07 (US/EU); other supported regions have not been verified. Hidden Armory URL / Recipe URL columns keep targets in CSV. XLSX uses real hyperlink relationships and Sheets uses text-format links, with no formulas. Only HTTPS on the two exact public hosts and approved paths is accepted.
+
 ## Publish to Google Sheets
 
 Excel/CSV import works without Google credentials. For repeatable direct updates, create a **new empty spreadsheet**, enable the Google Sheets API in your Google Cloud project, and either:
@@ -113,7 +124,7 @@ Set `GOOGLE_SPREADSHEET_ID` to the ID in the sheet URL, then run:
 just sheets     # publish output/roster/snapshot.json
 ```
 
-The tool creates Characters, Professions, Guild Info, and Automated Export Info with ownership metadata and places them first in that order. An owned Data Notes or Export Notes tab is renamed to Automated Export Info in the same atomic batch, preserving its sheet ID; multiple owned legacy tabs or a target-name collision stop the update. Unmanaged tabs are never renamed. Later updates replace only the owned tabs. An existing target tab with no ownership marker is refused before any write: **human tabs are never taken over**. To add generated tabs to an existing hand-maintained spreadsheet, first rename its clashing tabs (for example `Characters (old)`). Other tabs keep their contents. Don't remove the ownership metadata or change the generated identity/header columns.
+The tool creates Characters, Professions, Recipes, Guild Info, and Automated Export Info with ownership metadata and places them first in that order. An owned Data Notes or Export Notes tab is renamed to Automated Export Info in the same atomic batch, preserving its sheet ID; multiple owned legacy tabs or a target-name collision stop the update. Unmanaged tabs are never renamed. Later updates replace only the owned tabs. An existing target tab with no ownership marker is refused before any write: **human tabs are never taken over**. To add generated tabs to an existing hand-maintained spreadsheet, first rename its clashing tabs (for example `Characters (old)`). Other tabs keep their contents. Don't remove the ownership metadata or change the generated identity/header columns.
 
 **Player Notes (Editable) belongs to humans.** CSV/API/config never supply notes, and local exports leave those columns blank. In managed Google Sheets, Characters and Professions preserve their own notes by region + character identity when rows reorder. The old Characters Notes header migrates automatically; the legacy multi-row Professions layout gains a new, empty notes column. Notes are never copied between the two tabs. ID-based notes never attach to a conflicting ID; a legacy slug-only note may upgrade to the current ID at that slug because no prior ID exists to distinguish a rename/upgrade from name reuse. Prefer stable-ID snapshots and avoid editing hidden identity cells. Missing or ambiguous editable headers stop publication instead of discarding notes. If a departing/unidentified character has Notes, publishing stops before changing the sheet; archive the note elsewhere and clear the old cell before retrying. Avoid editing Notes during publishing: the Sheets API has no compare-and-swap for concurrent cell edits. Keep long-term freeform notes in a separate human-owned tab if you need independent editing.
 
@@ -155,4 +166,4 @@ Architecture and contributor rules are in [AGENTS.md](AGENTS.md); reusable repo 
 
 ## API status
 
-Forever is an official Blizzard product. As checked **2026-11-07**, its launch-week API routes are still undocumented in the developer portal. This adapter uses the realmless routes reported in the [Blizzard forum research](https://us.forums.blizzard.com/en/blizzard/t/wow-forever-api-what-works-so-far-plus-a-ts-client/60334) and the corresponding [client author's types](https://github.com/Pinta365/blizzard_api/tree/main/src/wow_forever), with runtime validation and mocked contract tests. An authenticated **US live check on 2026-11-07** verified guild discovery, ranks, profiles, profession levels/secondaries, talent-tree point spend and expected per-character 404 handling. Real responses and credentials remain private; automated tests use synthetic fixtures. Other regions have not been live-verified by this project. Low-level/unpublished characters may return 404. Unexpected response shapes are flagged; no HTML scraping or Retail fallback is used.
+Forever is an official Blizzard product. As checked **2026-11-07**, its launch-week API routes are still undocumented in the developer portal. This adapter uses the realmless routes reported in the [Blizzard forum research](https://us.forums.blizzard.com/en/blizzard/t/wow-forever-api-what-works-so-far-plus-a-ts-client/60334) and the corresponding [client author's types](https://github.com/Pinta365/blizzard_api/tree/main/src/wow_forever), with runtime validation and mocked contract tests. An authenticated **US live check on 2026-11-07** verified guild discovery, ranks, profiles, profession levels/secondaries, profile metrics, recipe response fields, talent-tree point spend and expected per-character 404 handling. Real responses and credentials remain private; automated tests use synthetic fixtures. Other regions have not been live-verified by this project. Low-level/unpublished characters may return 404. Unexpected response shapes are flagged; no HTML scraping or Retail fallback is used.

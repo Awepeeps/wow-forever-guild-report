@@ -10,7 +10,7 @@ The lead agent writes implementation code. Delegate research, analysis, and inde
 - `src/blizzard.ts`: the isolated Forever API adapter. No Retail paths or Armory HTML fallback.
 - `src/http.ts`: bounded retries/timeouts and safe errors. API response bodies, URLs with tokens, and credential values must not enter errors/logs.
 - `src/roster.ts`: guild discovery, independent enrichment, retained data, status, and sorting.
-- `src/workbook.ts`: pure table/CSV/OOXML renderers. Keep formulas and external links out of generated workbooks.
+- `src/workbook.ts`: pure table/CSV/OOXML renderers. Keep formulas out of generated workbooks. Only deterministic HTTPS Armory/Wowhead public links requested by the user may be emitted; never accept arbitrary link targets from API/config data.
 - `src/presentation.ts`: shared column widths/visibility and readable class colors for XLSX and Google Sheets.
 - `src/sheets.ts`: explicit Google writes, ownership checks, preservation of human Notes.
 - `src/files.ts`, `src/import.ts`, `src/cli.ts`: private I/O, migration, command orchestration.
@@ -23,7 +23,7 @@ Forever identities are region + character ID where available, otherwise region +
 
 Characters and Professions sort by numeric guild rank, Discord, then character name, with unknown ranks last and unmapped Discord entries last within rank; ties are deterministic. Talent points come from `spent_points` for active groups; never guess a spec or sum different groups. Preserve every returned profession tier and secondary profession. Unknown is not zero.
 
-Tab order is Characters, Professions, Guild Info, Automated Export Info. Professions has one row per character with primary and secondary summaries preserving all tiers. Keep technical diagnostics hidden and Player Notes (Editable) visible and independently human-owned on both roster tabs. Only owned legacy Data Notes/Export Notes tabs may migrate to Automated Export Info; never rename an unmanaged tab or overwrite a collision. Legacy Characters Notes migrates by header name and identity.
+Tab order is Characters, Professions, Recipes, Guild Info, Automated Export Info. Professions has one row per character with primary and secondary summaries preserving all tiers. Recipes aggregates known recipe IDs by profession, deduplicates characters across tiers and labels retained/manual knowledge. Missing recipe arrays mean unknown coverage, not zero recipes. Keep technical diagnostics hidden and Player Notes (Editable) visible and independently human-owned on both roster tabs. Only owned legacy Data Notes/Export Notes tabs may migrate to Automated Export Info; never rename an unmanaged tab or overwrite a collision. Legacy Characters Notes migrates by header name and identity.
 
 A guild lookup/auth failure must not publish an empty successful roster. Individual endpoint failures keep prior/supplied data and mark it incomplete. Keep last-success timestamps when values are retained. `Generated At`/fetch times must not be represented as Blizzard update times.
 

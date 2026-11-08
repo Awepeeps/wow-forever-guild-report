@@ -4,6 +4,64 @@ import { characterSchema, configSchema, snapshotSchema } from "../src/model.ts";
 import { refreshRoster } from "../src/roster.ts";
 import { config, now, snapshot, source } from "./helpers.ts";
 
+test("failed components retain metrics/recipes and their success times, while successful omitted metrics become unknown", async () => {
+  const profile = {
+    equippedItemLevel: 12,
+    averageItemLevel: 15,
+    experience: 0,
+    achievementPoints: 20,
+    lastLoginAt: "2026-11-06T12:00:00.000Z",
+  };
+  const primary = [
+    { name: "Alchemy", recipes: [{ id: 42, name: "Invented Tonic" }] },
+  ];
+  const input = configSchema.parse({
+    ...config,
+    characters: [{ slug: "example-priest", name: "Example Priest" }],
+  });
+  const previous = await refreshRoster(
+    input,
+    {},
+    source({
+      profile: async () => profile,
+      professions: async () => ({ primary, secondary: [] }),
+    }),
+    now,
+  );
+  const unavailable = async (): Promise<never> => {
+    throw new ApiError("Blizzard API", 404);
+  };
+  const later = new Date("2026-11-08T16:00:00.000Z");
+  const result = await refreshRoster(
+    input,
+    {},
+    source({ profile: unavailable, professions: unavailable }),
+    later,
+    previous,
+  );
+  expect(result.rows[0]?.character).toMatchObject({ ...profile, primary });
+  expect(result.rows[0]?.profileFetchedAt).toBe(now.toISOString());
+  expect(result.rows[0]?.professionFetchedAt).toBe(now.toISOString());
+  const successful = await refreshRoster(
+    input,
+    {},
+    source({
+      profile: async () => ({
+        equippedItemLevel: undefined,
+        averageItemLevel: undefined,
+        experience: undefined,
+        achievementPoints: undefined,
+        lastLoginAt: undefined,
+      }),
+    }),
+    later,
+    previous,
+  );
+  expect(successful.rows[0]?.character.experience).toBeUndefined();
+  expect(successful.rows[0]?.character.lastLoginAt).toBeUndefined();
+  expect(successful.rows[0]?.profileFetchedAt).toBe(later.toISOString());
+});
+
 describe("guild roster refresh", () => {
   test("stable-ID renames retain enrichment and success times for guild and explicit discovery", async () => {
     const priorConfig = configSchema.parse({

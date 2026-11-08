@@ -79,6 +79,11 @@ export function columnPresentation(
     "Sync Notes",
     "Generated At",
     "Guild Rank Number",
+    "Recipe Coverage",
+    "Recipe ID",
+    "Recipe URL",
+    "Armory URL",
+    "Average ilvl",
   ]);
   const hidden =
     technical.has(header) ||
@@ -89,6 +94,10 @@ export function columnPresentation(
     Class: 100,
     Level: 75,
     "Guild Rank": 110,
+    "Equipped ilvl": 90,
+    "Last Login (UTC)": 180,
+    "Achievement Points": 110,
+    "XP (API)": 100,
     "Talent Points": 190,
     [playerNotesHeader]: 200,
     "API Status": 110,
@@ -96,6 +105,10 @@ export function columnPresentation(
     "Primary Professions": 230,
     "Secondary Professions": 250,
     "Profession API Status": 120,
+    Profession: 160,
+    Recipe: 240,
+    "Known By": 460,
+    "Knower Data": 160,
     Topic: 220,
     Details: 720,
     Metric: 300,

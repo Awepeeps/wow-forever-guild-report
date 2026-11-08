@@ -9,12 +9,21 @@ export const slugSchema = z
   .min(1)
   .max(200)
   .regex(/^[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*$/u);
+export const recipeSchema = z
+  .object({
+    id: z.number().int().positive(),
+    name: z.string().trim().min(1).max(200),
+  })
+  .strict();
+export type Recipe = z.infer<typeof recipeSchema>;
 export const professionSchema = z
   .object({
     name,
     skill: z.number().int().nonnegative().optional(),
     max: z.number().int().nonnegative().optional(),
     tier: name.optional(),
+    // Omitted means recipe coverage is unknown (including older snapshots).
+    recipes: z.array(recipeSchema).max(10_000).optional(),
   })
   .strict()
   .refine(
@@ -34,6 +43,11 @@ export const characterSchema = z
     race: text.default(""),
     level: z.number().int().min(1).max(1_000).optional(),
     guildRank: z.number().int().nonnegative().max(999).optional(),
+    equippedItemLevel: z.number().int().nonnegative().optional(),
+    averageItemLevel: z.number().int().nonnegative().optional(),
+    lastLoginAt: z.iso.datetime().optional(),
+    achievementPoints: z.number().int().nonnegative().optional(),
+    experience: z.number().int().nonnegative().optional(),
     talents: z
       .array(
         z

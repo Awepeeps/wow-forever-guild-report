@@ -5,6 +5,7 @@ import {
   characterSchema,
   type Profession,
   type RosterConfig,
+  recipeSchema,
   slugSchema,
 } from "./model.ts";
 
@@ -18,11 +19,22 @@ const profileSchema = z.object({
   faction: reference.optional(),
   race: reference.optional(),
   level: z.number().int().positive().optional(),
+  equipped_item_level: z.number().int().nonnegative().optional(),
+  average_item_level: z.number().int().nonnegative().optional(),
+  last_login_timestamp: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(253_402_300_799_999)
+    .optional(),
+  achievement_points: z.number().int().nonnegative().optional(),
+  experience: z.number().int().nonnegative().optional(),
 });
 const tierSchema = z.object({
   tier: reference.optional(),
   skill_points: z.number().int().nonnegative(),
   max_skill_points: z.number().int().nonnegative(),
+  known_recipes: z.array(recipeSchema.strip()).max(10_000).optional(),
 });
 const apiProfession = z.object({
   profession: reference,
@@ -93,6 +105,7 @@ function normalizeProfessions(
         skill: t.skill_points,
         max: t.max_skill_points,
         ...(t.tier ? { tier: t.tier.name } : {}),
+        ...(t.known_recipes === undefined ? {} : { recipes: t.known_recipes }),
       }));
     return [
       {
@@ -203,6 +216,13 @@ export class BlizzardClient {
       ...(p.faction ? { faction: p.faction.name } : {}),
       ...(p.race ? { race: p.race.name } : {}),
       ...(p.level ? { level: p.level } : {}),
+      equippedItemLevel: p.equipped_item_level,
+      averageItemLevel: p.average_item_level,
+      achievementPoints: p.achievement_points,
+      experience: p.experience,
+      lastLoginAt: p.last_login_timestamp
+        ? new Date(p.last_login_timestamp).toISOString()
+        : undefined,
     };
   }
 

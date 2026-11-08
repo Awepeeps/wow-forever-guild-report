@@ -2,6 +2,7 @@ import { createSign } from "node:crypto";
 import { z } from "zod";
 import { readJson } from "./files.ts";
 import { HttpClient, SafeError } from "./http.ts";
+import { validatedLinks } from "./links.ts";
 import {
   classStyle,
   columnPresentation,
@@ -234,6 +235,7 @@ export function sheetRequests(
   const used = new Set(existing.map((s) => s.sheetId));
   const requests: unknown[] = [];
   for (const [index, table] of tables.entries()) {
+    const links = validatedLinks(table.rows, table.links);
     const title = table.name;
     let id = existing.find((s) => s.title === title)?.sheetId;
     const rows = table.rows.length;
@@ -400,6 +402,35 @@ export function sheetRequests(
             fields: "userEnteredFormat",
           },
         });
+      for (const column of new Set(links.map((link) => link.column))) {
+        const targets = new Map(
+          links
+            .filter((link) => link.column === column)
+            .map((link) => [link.row, link.url]),
+        );
+        requests.push({
+          updateCells: {
+            start: { sheetId: id, rowIndex: 1, columnIndex: column },
+            rows: table.rows.slice(1).map((_, i) => ({
+              values: [
+                {
+                  userEnteredFormat: {
+                    textFormat: targets.has(i + 1)
+                      ? {
+                          link: { uri: targets.get(i + 1) },
+                          foregroundColor: rgb("0563C1"),
+                          underline: true,
+                        }
+                      : {},
+                  },
+                },
+              ],
+            })),
+            fields:
+              "userEnteredFormat.textFormat.link,userEnteredFormat.textFormat.foregroundColor,userEnteredFormat.textFormat.underline",
+          },
+        });
+      }
       if (noteColumn >= 0)
         requests.push({
           updateCells: {

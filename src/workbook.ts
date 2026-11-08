@@ -1,4 +1,10 @@
 import { strToU8, zipSync } from "fflate";
+import {
+  armoryUrl,
+  type PublicLink,
+  recipeUrl,
+  validatedLinks,
+} from "./links.ts";
 import { type Profession, type Snapshot, sortRows } from "./model.ts";
 import {
   classStyle,
@@ -6,11 +12,13 @@ import {
   playerGroups,
   playerNotesHeader,
 } from "./presentation.ts";
+import { knowerChunks, knownRecipes, recipeCoverage } from "./recipes.ts";
 
 export type Cell = string | number;
 export interface Table {
   name: string;
   rows: Cell[][];
+  links?: PublicLink[];
 }
 
 export function buildTables(snapshot: Snapshot): Table[] {
@@ -21,6 +29,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Class",
       "Level",
       "Guild Rank",
+      "Equipped ilvl",
+      "Average ilvl",
+      "Last Login (UTC)",
+      "Achievement Points",
+      "XP (API)",
       "Talent Points",
       "API Status",
       playerNotesHeader,
@@ -40,6 +53,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Talents Last Success",
       "Sync Notes",
       "Guild Rank Number",
+      "Armory URL",
     ],
   ];
   const professions: Cell[][] = [
@@ -53,9 +67,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
       playerNotesHeader,
       "Generated At",
       "Professions Last Success",
+      "Recipe Coverage",
       "Region",
       "Character Slug",
       "Character ID",
+      "Armory URL",
     ],
   ];
   for (const row of sortRows([...snapshot.rows])) {
@@ -84,6 +100,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
         ? ""
         : (snapshot.guildRankNames[String(c.guildRank)] ??
           `Rank ${c.guildRank} (unmapped)`),
+      c.equippedItemLevel ?? "",
+      c.averageItemLevel ?? "",
+      c.lastLoginAt ?? "",
+      c.achievementPoints ?? "",
+      c.experience ?? "",
       c.talents
         .map(
           (t) => `${t.group ? `Group ${t.group}: ` : ""}${t.tree} ${t.points}`,
@@ -111,6 +132,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       row.talentFetchedAt ?? "",
       row.issue.trim(),
       c.guildRank ?? "",
+      armoryUrl(snapshot.region, c.slug),
     ]);
     const describe = (list: Profession[]) =>
       list.length
@@ -138,10 +160,43 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "",
       snapshot.generatedAt,
       row.professionFetchedAt ?? "",
+      recipeCoverage(row),
       snapshot.region,
       c.slug,
       c.id ?? "",
+      armoryUrl(snapshot.region, c.slug),
     ]);
+  }
+  const recipeEntries = knownRecipes(snapshot);
+  const recipes: Cell[][] = [
+    [
+      "Profession",
+      "Recipe",
+      "Known By",
+      "Knower Data",
+      "Recipe ID",
+      "Generated At",
+      "Recipe URL",
+    ],
+  ];
+  for (const recipe of recipeEntries) {
+    const status = recipe.knowers.some((r) =>
+      ["error", "unavailable"].includes(r.professionStatus),
+    )
+      ? "Includes retained data"
+      : recipe.knowers.some((r) => r.professionStatus === "manual")
+        ? "Includes manual data"
+        : "Current reports";
+    for (const chunk of knowerChunks(recipe.knowers))
+      recipes.push([
+        recipe.profession,
+        recipe.name,
+        chunk,
+        status,
+        recipe.id,
+        snapshot.generatedAt,
+        recipeUrl(recipe.name),
+      ]);
   }
   const guild: Cell[][] = [
     ["Metric", "Value"],
@@ -150,6 +205,15 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ["Generated At", snapshot.generatedAt],
     ["Characters", snapshot.rows.length],
     ["Discord Mapped", snapshot.rows.filter((r) => r.discord).length],
+    ["Known Recipes (distinct profession + ID)", recipeEntries.length],
+    [
+      "Recipe Coverage (current / characters)",
+      `${snapshot.rows.filter((r) => recipeCoverage(r) === "Current").length} / ${snapshot.rows.length}`,
+    ],
+    [
+      "Recipe Coverage",
+      "Only API-returned knowledge is listed; missing or retained data is not proof that nobody knows a recipe. See Professions' hidden Recipe Coverage column.",
+    ],
     [
       "API Profile Errors / Unavailable",
       snapshot.rows.filter((r) =>
@@ -222,13 +286,44 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Point spend in each tree in the active talent group; no inferred role/spec label.",
     ],
     [
+      "Character metrics",
+      "Item levels, achievement points, XP and last login are API-reported profile values. Average ilvl is hidden by default; Equipped ilvl is visible. Blank means unknown; a successful profile omitting a metric clears it, while a failed profile retains prior values and last-success time. XP is the raw experience field, not inferred lifetime XP or progress to the next level. Last Login is Blizzard's timestamp in UTC, not this export's fetch time; it may lag.",
+    ],
+    [
+      "Recipes",
+      "Recipes lists profession, recipe and known characters (with Discord), sorted by profession then recipe. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests retain known recipes with per-character last-success labels. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
+    ],
+    [
+      "Public links",
+      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open a Wowhead Forever name search: Blizzard recipe IDs are not Wowhead spell IDs, so an exact spell link cannot safely be inferred. Hidden URL columns keep link targets in CSV. Links use HTTPS on these two trusted hosts; no formulas or arbitrary API URLs are emitted.",
+    ],
+    [
       "Forever API research (community; US routes verified 2026-11-07)",
       "https://us.forums.blizzard.com/en/blizzard/t/wow-forever-api-what-works-so-far-plus-a-ts-client/60334",
     ],
   ];
   return [
-    { name: "Characters", rows: characters },
-    { name: "Professions", rows: professions },
+    {
+      name: "Characters",
+      rows: characters,
+      links: characters
+        .slice(1)
+        .map((row, i) => ({ row: i + 1, column: 1, url: String(row.at(-1)) })),
+    },
+    {
+      name: "Professions",
+      rows: professions,
+      links: professions
+        .slice(1)
+        .map((row, i) => ({ row: i + 1, column: 1, url: String(row.at(-1)) })),
+    },
+    {
+      name: "Recipes",
+      rows: recipes,
+      links: recipes
+        .slice(1)
+        .map((row, i) => ({ row: i + 1, column: 1, url: String(row.at(-1)) })),
+    },
     { name: "Guild Info", rows: guild },
     { name: "Automated Export Info", rows: reference },
   ];
@@ -290,7 +385,8 @@ function professionRowHeight(table: Table, row: Cell[]): number {
   return Math.min(409, Math.max(18, Math.max(...lines, 1) * 15 + 3));
 }
 
-// A small OOXML writer: inline strings avoid formulas and external links entirely.
+// A small OOXML writer: inline strings avoid formulas. Explicit, validated
+// hyperlink relationships provide public drill-down without HYPERLINK formulas.
 export function toXlsx(tables: Table[]): Uint8Array {
   const classNames = [
     ...new Set(
@@ -336,9 +432,18 @@ export function toXlsx(tables: Table[]): Uint8Array {
   );
   add(
     "xl/styles.xml",
-    `<styleSheet xmlns="${ns}"><fonts count="${2 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}</fonts><fills count="${4 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${3 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}<xf numFmtId="0" fontId="0" fillId="${3 + classStyles.length}" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
+    `<styleSheet xmlns="${ns}"><fonts count="${3 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}<font><u/><color rgb="FF0563C1"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="${4 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${5 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}<xf numFmtId="0" fontId="0" fillId="${3 + classStyles.length}" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>${[0, 3 + classStyles.length].map((fill) => `<xf numFmtId="0" fontId="${2 + classStyles.length}" fillId="${fill}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
   );
   tables.forEach((table, i) => {
+    const links = validatedLinks(table.rows, table.links);
+    const linkCells = new Set(
+      links.map((link) => `${link.row}:${link.column}`),
+    );
+    if (links.length)
+      add(
+        `xl/worksheets/_rels/sheet${i + 1}.xml.rels`,
+        `<Relationships xmlns="${relns}">${links.map((link, j) => `<Relationship Id="link${j + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xml(link.url)}" TargetMode="External"/>`).join("")}</Relationships>`,
+      );
     const width = table.rows[0]?.length ?? 1;
     const last = `${column(width - 1)}${Math.max(1, table.rows.length)}`;
     const classColumn = table.rows[0]?.indexOf("Class") ?? -1;
@@ -352,7 +457,7 @@ export function toXlsx(tables: Table[]): Uint8Array {
     const rows = table.rows
       .map(
         (row, r) =>
-          `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : table.name === "Professions" ? ` ht="${professionRowHeight(table, row)}" customHeight="1"` : ""}>${row
+          `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : ["Professions", "Recipes"].includes(table.name) ? ` ht="${professionRowHeight(table, row)}" customHeight="1"` : ""}>${row
             .map((cell, c) => {
               const colorIndex =
                 c === classColumn
@@ -361,11 +466,13 @@ export function toXlsx(tables: Table[]): Uint8Array {
               const style =
                 r === 0
                   ? 1
-                  : c < 2 && shadedRows.has(r)
-                    ? 2 + classStyles.length
-                    : colorIndex < 0
-                      ? 0
-                      : colorIndex + 2;
+                  : linkCells.has(`${r}:${c}`)
+                    ? (c < 2 && shadedRows.has(r) ? 4 : 3) + classStyles.length
+                    : c < 2 && shadedRows.has(r)
+                      ? 2 + classStyles.length
+                      : colorIndex < 0
+                        ? 0
+                        : colorIndex + 2;
               return `<c r="${column(c)}${r + 1}" s="${style}" t="${typeof cell === "number" ? "n" : "inlineStr"}">${typeof cell === "number" ? `<v>${cell}</v>` : `<is><t xml:space="preserve">${xml(cell)}</t></is>`}</c>`;
             })
             .join("")}</row>`,
@@ -373,7 +480,7 @@ export function toXlsx(tables: Table[]): Uint8Array {
       .join("");
     add(
       `xl/worksheets/sheet${i + 1}.xml`,
-      `<worksheet xmlns="${ns}"><dimension ref="A1:${last}"/><sheetViews><sheetView workbookViewId="0"><pane ${frozen ? 'xSplit="2" ' : ""}ySplit="1" topLeftCell="${frozen ? "C2" : "A2"}" activePane="${frozen ? "bottomRight" : "bottomLeft"}" state="frozen"/></sheetView></sheetViews><cols>${(
+      `<worksheet xmlns="${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><dimension ref="A1:${last}"/><sheetViews><sheetView workbookViewId="0"><pane ${frozen ? 'xSplit="2" ' : ""}ySplit="1" topLeftCell="${frozen ? "C2" : "A2"}" activePane="${frozen ? "bottomRight" : "bottomLeft"}" state="frozen"/></sheetView></sheetViews><cols>${(
         table.rows[0] ?? [""]
       )
         .map((header, c) => {
@@ -382,7 +489,7 @@ export function toXlsx(tables: Table[]): Uint8Array {
         })
         .join(
           "",
-        )}</cols><sheetData>${rows}</sheetData><autoFilter ref="A1:${last}"/></worksheet>`,
+        )}</cols><sheetData>${rows}</sheetData><autoFilter ref="A1:${last}"/>${links.length ? `<hyperlinks>${links.map((link, j) => `<hyperlink ref="${column(link.column)}${link.row + 1}" r:id="link${j + 1}"/>`).join("")}</hyperlinks>` : ""}</worksheet>`,
     );
   });
   return zipSync(files, { level: 6 });

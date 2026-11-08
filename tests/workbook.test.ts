@@ -42,6 +42,7 @@ test("workbook has adjacent roster/profession tabs, real numeric cells, frozen h
   expect(tables.map((t) => t.name)).toEqual([
     "Characters",
     "Professions",
+    "Recipes",
     "Guild Info",
     "Automated Export Info",
   ]);
@@ -53,7 +54,7 @@ test("workbook has adjacent roster/profession tabs, real numeric cells, frozen h
   ]);
   const files = unzipSync(bytes);
   const sheet = strFromU8(
-    files["xl/worksheets/sheet5.xml"] ?? new Uint8Array(),
+    files["xl/worksheets/sheet6.xml"] ?? new Uint8Array(),
   );
   expect(sheet).toContain("=1+1");
   expect(sheet).not.toContain("<f>");
@@ -98,12 +99,17 @@ test("compact roster keeps skills in Professions and hides technical columns wit
   const characters = tables[0];
   const professions = tables[1];
   if (!characters || !professions) throw new Error("fixture");
-  expect(characters.rows[0]?.slice(0, 9)).toEqual([
+  expect(characters.rows[0]?.slice(0, 14)).toEqual([
     "Discord",
     "Character Name",
     "Class",
     "Level",
     "Guild Rank",
+    "Equipped ilvl",
+    "Average ilvl",
+    "Last Login (UTC)",
+    "Achievement Points",
+    "XP (API)",
     "Talent Points",
     "API Status",
     "Player Notes (Editable)",
@@ -138,7 +144,7 @@ test("compact roster keeps skills in Professions and hides technical columns wit
   const styles = strFromU8(files["xl/styles.xml"] ?? new Uint8Array());
   expect(sheet).toContain('topLeftCell="C2"');
   expect(sheet).toContain(
-    'min="10" max="10" width="25.71" customWidth="1" hidden="1"',
+    'min="15" max="15" width="25.71" customWidth="1" hidden="1"',
   );
   expect(sheet).toContain('r="C2" s="2"');
   expect(styles).toContain('rgb="FF0070DE"');

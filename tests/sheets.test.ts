@@ -54,6 +54,28 @@ test("refuses tab collisions with human spreadsheets before any write", async ()
   expect(calls).toBe(1);
 });
 
+test("adding Recipes refuses an existing human-owned Recipes tab without writing or adopting it", async () => {
+  let writes = 0;
+  const http = new HttpClient(async (_, init) => {
+    if (init?.method === "POST") writes++;
+    return Response.json({
+      sheets: [
+        { properties: { sheetId: 20, title: "Recipes" } },
+        { properties: { sheetId: 21, title: "Human Notes" } },
+      ],
+    });
+  });
+  await expect(
+    publishSheets(
+      buildTables(snapshot),
+      "example-spreadsheet-id",
+      "test-token",
+      http,
+    ),
+  ).rejects.toThrow("unmanaged");
+  expect(writes).toBe(0);
+});
+
 test("human Notes follow character identity across reordering and cannot be silently discarded", () => {
   const table = buildTables(snapshot)[0];
   if (!table) throw new Error("fixture");
@@ -200,7 +222,9 @@ test("Notes formatting follows identity even for empty cells when rows reorder",
     };
   }[];
   const restored = requests.find(
-    (r) => r.updateCells?.start?.columnIndex === 7,
+    (r) =>
+      r.updateCells?.start?.columnIndex ===
+      table.rows[0]?.indexOf("Player Notes (Editable)"),
   )?.updateCells;
   expect(restored?.rows.map((r) => r.values[0]?.userEnteredFormat)).toEqual([
     formats[1],
@@ -210,7 +234,10 @@ test("Notes formatting follows identity even for empty cells when rows reorder",
     const range = request.repeatCell?.range;
     if (range?.startRowIndex === 1)
       expect(
-        (range.endColumnIndex ?? 24) <= 7 || (range.startColumnIndex ?? 0) > 7,
+        (range.endColumnIndex ?? Infinity) <=
+          (table.rows[0]?.indexOf("Player Notes (Editable)") ?? -1) ||
+          (range.startColumnIndex ?? 0) >
+            (table.rows[0]?.indexOf("Player Notes (Editable)") ?? -1),
       ).toBe(true);
   }
 });
@@ -344,13 +371,19 @@ test("layout migration renames only owned Data Notes in the same batch and prese
     (r) => r.updateCells?.range?.sheetId === 3,
   )?.updateCells;
   expect(
-    updatedCharacters?.rows[1]?.values[7]?.userEnteredValue?.stringValue,
+    updatedCharacters?.rows[1]?.values[
+      buildTables(snapshot)[0]?.rows[0]?.indexOf("Player Notes (Editable)") ??
+        -1
+    ]?.userEnteredValue?.stringValue,
   ).toBe("Keep this human note");
   expect(
     body.requests.find(
       (r) =>
         r.updateCells?.start?.sheetId === 3 &&
-        r.updateCells.start.columnIndex === 7,
+        r.updateCells.start.columnIndex ===
+          (buildTables(snapshot)[0]?.rows[0]?.indexOf(
+            "Player Notes (Editable)",
+          ) ?? -1),
     )?.updateCells?.rows[0]?.values[0]?.userEnteredFormat,
   ).toEqual(humanFormat);
   expect(JSON.stringify(body)).not.toContain('"sheetId":9');
@@ -452,10 +485,16 @@ test("class formatting preserves names, uses readable text, and hides diagnostic
     r.updateDimensionProperties ? [r.updateDimensionProperties] : [],
   );
   expect(
-    dimensions.find((d) => d.range.startIndex === 7)?.properties.hiddenByUser,
+    dimensions.find(
+      (d) =>
+        d.range.startIndex ===
+        table.rows[0]?.indexOf("Player Notes (Editable)"),
+    )?.properties.hiddenByUser,
   ).toBe(false);
   expect(
-    dimensions.find((d) => d.range.startIndex === 8)?.properties.hiddenByUser,
+    dimensions.find(
+      (d) => d.range.startIndex === table.rows[0]?.indexOf("Generated At"),
+    )?.properties.hiddenByUser,
   ).toBe(true);
 });
 
@@ -923,7 +962,10 @@ test("one atomic upgrade handles legacy Characters notes and repeated long-form 
   });
   expect(
     batch?.requests.find((r) => r.updateCells?.range?.sheetId === 1)
-      ?.updateCells?.rows[1]?.values[7]?.userEnteredValue?.stringValue,
+      ?.updateCells?.rows[1]?.values[
+      buildTables(snapshot)[0]?.rows[0]?.indexOf("Player Notes (Editable)") ??
+        -1
+    ]?.userEnteredValue?.stringValue,
   ).toBe("Preserve legacy text");
   expect(
     batch?.requests.find((r) => r.updateCells?.range?.sheetId === 2)

@@ -23,7 +23,7 @@ const help = `WoW Forever Guild Report — guild profession workbooks (Bun + Var
   just refresh [config] [output-directory]
   just export [config] [output-directory]   Offline, supplied data only
   just import-csv input.csv [output.json]   Writes config and sibling discord-map.json
-  just sheets [snapshot.json]              Updates four tool-owned tabs; preserves Player Notes (Editable)
+  just sheets [snapshot.json]              Updates five tool-owned tabs; preserves Player Notes (Editable)
 
 Direct CLI: bun run cli <refresh|export|import|sheets> [options]
   --config .local/roster.json   --out output/roster
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
       await googleToken(process.env),
     );
     console.log(
-      "Published Characters, Professions, Guild Info, and Automated Export Info; preserved Player Notes (Editable).",
+      "Published Characters, Professions, Recipes, Guild Info, and Automated Export Info; preserved Player Notes (Editable).",
     );
     return;
   }
