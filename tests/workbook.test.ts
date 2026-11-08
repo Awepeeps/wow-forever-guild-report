@@ -142,7 +142,13 @@ test("compact roster keeps skills in Professions and hides technical columns wit
   const characters = tables[0];
   const professions = tables[1];
   if (!characters || !professions) throw new Error("fixture");
-  expect(characters.rows[0]?.slice(0, 15)).toEqual([
+  // Player Notes (Editable) is always the final column on both roster tabs.
+  expect(characters.rows[0]?.at(-1)).toBe("Player Notes (Editable)");
+  expect(professions.rows[0]?.at(-1)).toBe("Player Notes (Editable)");
+  expect(
+    characters.rows.every((row) => row.length === characters.rows[0]?.length),
+  ).toBe(true);
+  expect(characters.rows[0]?.slice(0, 14)).toEqual([
     "Discord",
     "Character Name",
     "Guild Rank",
@@ -153,7 +159,6 @@ test("compact roster keeps skills in Professions and hides technical columns wit
     "iLvl",
     "Last Login",
     "Character API Status",
-    "Player Notes (Editable)",
     "API Details",
     "Average ilvl",
     "Last Login (UTC)",
@@ -310,8 +315,9 @@ test("profession summaries retain every tier, distinguish zero/unknown, and both
     "Primary Professions",
     "Secondary Professions",
     "Profession API Status",
-    "Player Notes (Editable)",
+    "API Details",
   ]);
+  expect(prof.rows[0]?.at(-1)).toBe("Player Notes (Editable)");
   // Rendering a previously saved snapshot must not mutate its source order.
   expect(rows[0]?.character.slug).toBe("officer-z");
 });

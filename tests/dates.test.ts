@@ -418,7 +418,9 @@ test("the full previous Characters layout preserves the old note and format befo
   }[];
   const values = requests.find((r) => r.updateCells?.range)?.updateCells
     ?.rows[1]?.values;
-  expect(values?.[10]?.userEnteredValue?.stringValue).toBe(
+  const noteColumn = table.rows[0]?.indexOf("Player Notes (Editable)") ?? -1;
+  expect(noteColumn).toBe((table.rows[0]?.length ?? 0) - 1);
+  expect(values?.[noteColumn]?.userEnteredValue?.stringValue).toBe(
     "Keep this player note",
   );
   expect(
@@ -426,7 +428,7 @@ test("the full previous Characters layout preserves the old note and format befo
       ?.stringValue,
   ).toBe("2026-11-07T01:30:00.000Z");
   expect(
-    requests.find((r) => r.updateCells?.start?.columnIndex === 10)?.updateCells
-      ?.rows[0]?.values[0]?.userEnteredFormat,
+    requests.find((r) => r.updateCells?.start?.columnIndex === noteColumn)
+      ?.updateCells?.rows[0]?.values[0]?.userEnteredFormat,
   ).toEqual(format);
 });
