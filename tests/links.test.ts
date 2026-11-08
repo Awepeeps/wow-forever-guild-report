@@ -4,6 +4,7 @@ import { HttpClient } from "../src/http.ts";
 import {
   armoryUrl,
   assertPublicLink,
+  itemUrl,
   recipeUrl,
   upstreamRepositoryUrl,
 } from "../src/links.ts";
@@ -22,6 +23,10 @@ test("public links use encoded Forever slugs and validated Wowhead spell IDs", (
   const url = recipeUrl(72001);
   expect(url).toBe("https://www.wowhead.com/forever/spell=72001");
   expect(() => assertPublicLink(url)).not.toThrow();
+  expect(itemUrl(73001)).toBe("https://www.wowhead.com/forever/item=73001");
+  expect(() => assertPublicLink(itemUrl(73001))).not.toThrow();
+  for (const id of [-1, 0, 1.5, Number.NaN, 2_147_483_648])
+    expect(() => itemUrl(id)).toThrow();
   expect(() => assertPublicLink(upstreamRepositoryUrl)).not.toThrow();
   expect(() => assertPublicLink(armoryUrl("eu", "élise-o’neil"))).not.toThrow();
   for (const target of [
@@ -40,6 +45,10 @@ test("public links use encoded Forever slugs and validated Wowhead spell IDs", (
     "https://www.wowhead.com/forever/spell=72001?token=private",
     "https://www.wowhead.com/forever/spell=72001#private",
     "https://www.wowhead.com/forever/spell=72001/../../private",
+    "https://www.wowhead.com/forever/item=0",
+    "https://www.wowhead.com/forever/item=2147483648",
+    "https://www.wowhead.com/forever/item=73001?token=private",
+    "https://www.wowhead.com/forever/item=73001#private",
     "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/character/example/talents",
     "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/character/%2fprivate",
     "https://www.wowhead.com/forever/search?q=Example#private",

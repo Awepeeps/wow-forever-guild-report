@@ -147,6 +147,8 @@ export function columnPresentation(
     "Output Item ID",
     "Output Minimum",
     "Output Maximum",
+    "Makes URL",
+    "Materials URLs",
   ]);
   const hidden =
     technical.has(header) ||
@@ -182,7 +184,9 @@ export function columnPresentation(
     Value: 300,
   };
   return {
-    width: (Object.hasOwn(widths, header) ? widths[header] : undefined) ?? 180,
+    width: /^Material \d+$/.test(header)
+      ? 240
+      : ((Object.hasOwn(widths, header) ? widths[header] : undefined) ?? 180),
     hidden,
   };
 }

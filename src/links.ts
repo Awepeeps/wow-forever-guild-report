@@ -1,5 +1,10 @@
 import { SafeError } from "./http.ts";
-import { regionSchema, slugSchema, spellIdSchema } from "./model.ts";
+import {
+  itemIdSchema,
+  regionSchema,
+  slugSchema,
+  spellIdSchema,
+} from "./model.ts";
 
 export const upstreamRepositoryUrl =
   "https://github.com/Awepeeps/wow-forever-guild-report";
@@ -12,6 +17,11 @@ export function armoryUrl(region: string, slug: string): string {
 // Only a mapped Spell ID belongs here; a Blizzard recipe ID is a different ID space.
 export function recipeUrl(spellId: number): string {
   return `https://www.wowhead.com/forever/spell=${spellIdSchema.parse(spellId)}`;
+}
+
+// Crafted items and reagents already carry item IDs; no recipe/spell mapping is used.
+export function itemUrl(itemId: number): string {
+  return `https://www.wowhead.com/forever/item=${itemIdSchema.parse(itemId)}`;
 }
 
 export function assertPublicLink(value: string): void {
@@ -42,7 +52,7 @@ export function assertPublicLink(value: string): void {
     if (
       url.hostname === "www.wowhead.com" &&
       !url.search &&
-      /^\/forever\/spell=[1-9]\d{0,9}$/.test(url.pathname) &&
+      /^\/forever\/(?:spell|item)=[1-9]\d{0,9}$/.test(url.pathname) &&
       spellIdSchema.safeParse(Number(url.pathname.split("=")[1])).success
     )
       return;
@@ -68,6 +78,58 @@ export interface PublicLink {
   row: number;
   column: number;
   url: string;
+}
+
+export interface ItemLinkList {
+  row: number;
+  column: number;
+  items: { text: string; url: string }[];
+}
+
+// Entire material lines are linked. Deriving run offsets from this exact text
+// avoids mismatched quantities/names and UTF-16 offsets for non-BMP names.
+export function validatedItemLists(
+  rows: readonly (readonly (string | number)[])[],
+  lists: readonly ItemLinkList[] = [],
+  links: readonly PublicLink[] = [],
+): readonly ItemLinkList[] {
+  const cells = new Set(links.map((link) => `${link.row}:${link.column}`));
+  for (const list of lists) {
+    const key = `${list.row}:${list.column}`;
+    if (
+      !Number.isInteger(list.row) ||
+      list.row < 1 ||
+      list.row >= rows.length ||
+      !Number.isInteger(list.column) ||
+      list.column < 0 ||
+      list.column >= (rows[list.row]?.length ?? 0) ||
+      ["Notes", "Player Notes (Editable)"].includes(
+        String(rows[0]?.[list.column]),
+      ) ||
+      cells.has(key) ||
+      !list.items.length ||
+      list.items.length > 100 ||
+      list.items.some((item) => !item.text.length) ||
+      rows[list.row]?.[list.column] !==
+        list.items.map((item) => item.text).join("\n")
+    )
+      throw new SafeError(
+        "Workbook item links have an invalid, conflicting or mismatched cell.",
+      );
+    for (const item of list.items) {
+      assertPublicLink(item.url);
+      if (
+        !/^https:\/\/www\.wowhead\.com\/forever\/item=[1-9]\d{0,9}$/.test(
+          item.url,
+        )
+      )
+        throw new SafeError(
+          "Workbook material link must use a Wowhead Forever item ID.",
+        );
+    }
+    cells.add(key);
+  }
+  return lists;
 }
 export function validatedLinks(
   rows: readonly (readonly (string | number)[])[],

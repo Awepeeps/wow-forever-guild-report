@@ -176,6 +176,7 @@ export const rowSchema = z
 export type RosterRow = z.infer<typeof rowSchema>;
 export const foreverBuildSchema = z.string().regex(/^1\.60\.\d{1,3}\.\d{4,6}$/);
 export const spellIdSchema = z.number().int().positive().max(2_147_483_647);
+export const itemIdSchema = z.number().int().positive().max(2_147_483_647);
 export const recipeMappingSchema = z
   .object({
     build: foreverBuildSchema,
@@ -190,7 +191,7 @@ export const recipeMappingSchema = z
 export type RecipeMapping = z.infer<typeof recipeMappingSchema>;
 const recipeItemSchema = z
   .object({
-    id: z.number().int().positive().max(2_147_483_647),
+    id: itemIdSchema,
     name: z.string().trim().min(1).max(200),
   })
   .strict();
