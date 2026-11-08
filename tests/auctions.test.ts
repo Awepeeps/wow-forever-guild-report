@@ -7,6 +7,7 @@ import {
   money,
   recipePrices,
   refreshAuctionPrices,
+  signedMoney,
 } from "../src/auctions.ts";
 import { BlizzardClient } from "../src/blizzard.ts";
 import { ApiError, HttpClient } from "../src/http.ts";
@@ -552,4 +553,53 @@ test("margin per craft uses the yield range, colors only an unambiguous gain or 
       (inner.match(new RegExp(`<${tag.slice(0, -1)}>`, "g")) ?? []).length,
     ).toBe(count);
   }
+});
+
+test("margin subtracts only the configured sale cut from output value, and Guild Info states the basis", async () => {
+  const withCut = (saleCutPercent?: number) => {
+    const configured = auctionMarketSchema.parse({ ...market, saleCutPercent });
+    const base = input();
+    return refreshAuctionPrices(
+      { ...base, auctionMarket: configured },
+      { auctionPrices: async () => book },
+      undefined,
+      now,
+    );
+  };
+  const fixed = { ...details, quantity: { min: 2, max: 2 } };
+  // 2 × 1000c × 0.95 − 74c materials.
+  expect(recipePrices(await withCut(5), fixed)).toMatchObject({
+    margin: "+18s 26c",
+    marginCopper: 1826,
+    tone: "gain",
+  });
+  expect(recipePrices(await withCut(undefined), fixed).marginCopper).toBe(1926);
+  // A 100% cut leaves only the material cost as a loss.
+  expect(recipePrices(await withCut(100), fixed)).toMatchObject({
+    margin: "−74c",
+    tone: "loss",
+  });
+  expect(() =>
+    auctionMarketSchema.parse({ ...market, saleCutPercent: 101 }),
+  ).toThrow();
+  expect(() =>
+    auctionMarketSchema.parse({ ...market, saleCutPercent: -1 }),
+  ).toThrow();
+  const basis = (snapshot: Awaited<ReturnType<typeof withCut>>) =>
+    buildTables(snapshot)
+      .find((t) => t.name === "Guild Info")
+      ?.rows.find((r) => r[0] === "AH Margin Basis")?.[1];
+  expect(basis(await withCut(5))).toBe(
+    "After a 5% auction house cut; deposits excluded (refunded on sale)",
+  );
+  expect(basis(await withCut(undefined))).toBe(
+    "Before the auction house cut (no sale cut configured)",
+  );
+});
+
+test("margins display whole copper, and sub-copper results count as break-even", () => {
+  expect(signedMoney(-54.3)).toBe("−54c");
+  expect(signedMoney(193.55)).toBe("+1s 94c");
+  expect(signedMoney(0.4)).toBe("±0c");
+  expect(signedMoney(-0.4)).toBe("±0c");
 });

@@ -122,8 +122,9 @@ export function money(copper: number): string {
     .join(" ");
 }
 
+/** Signed whole-copper amount; copper is the smallest coin a sale can yield. */
 export function signedMoney(copper: number): string {
-  const rounded = Math.round(copper * 100) / 100;
+  const rounded = Math.round(copper);
   if (rounded === 0) return "±0c";
   return `${rounded > 0 ? "+" : "−"}${money(Math.abs(rounded))}`;
 }
@@ -171,25 +172,33 @@ export function recipePrices(
       }
     }
   }
-  // Margin per craft: output value at the reported yield minus material cost.
+  // Margin per craft: output value at the reported yield, after the configured
+  // sale cut, minus material cost. Deposits are refunded on sale, so excluded.
   // A variable yield gives a range; it is only colored when both ends agree.
   let margin = "Unknown";
   let marginCopper: number | undefined;
   let tone: "gain" | "loss" | undefined;
   if (output && materialCopper !== undefined && details?.quantity) {
-    const low = output.unitCopper * details.quantity.min - materialCopper,
-      high = output.unitCopper * details.quantity.max - materialCopper;
+    const net =
+      output.unitCopper *
+      (1 - (snapshot.auctionMarket?.saleCutPercent ?? 0) / 100);
+    const low = net * details.quantity.min - materialCopper,
+      high = net * details.quantity.max - materialCopper;
     if (
       Math.abs(low) <= Number.MAX_SAFE_INTEGER &&
       Math.abs(high) <= Number.MAX_SAFE_INTEGER
     ) {
-      const cents = (copper: number) => Math.round(copper * 100);
       marginCopper = low;
       margin =
         low === high
           ? signedMoney(low)
           : `${signedMoney(low)} to ${signedMoney(high)}`;
-      tone = cents(low) > 0 ? "gain" : cents(high) < 0 ? "loss" : undefined;
+      tone =
+        Math.round(low) > 0
+          ? "gain"
+          : Math.round(high) < 0
+            ? "loss"
+            : undefined;
     }
   }
   const incomplete = !output || materialCopper === undefined;

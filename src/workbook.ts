@@ -385,6 +385,14 @@ export function buildTables(snapshot: Snapshot): Table[] {
         : "Not configured",
     ],
     ["Auction Market Verified At", snapshot.auctionMarket?.verifiedAt ?? ""],
+    [
+      "AH Margin Basis",
+      snapshot.auctionMarket
+        ? snapshot.auctionMarket.saleCutPercent === undefined
+          ? "Before the auction house cut (no sale cut configured)"
+          : `After a ${snapshot.auctionMarket.saleCutPercent}% auction house cut; deposits excluded (refunded on sale)`
+        : "Not configured",
+    ],
     ["AH Snapshot (UTC)", auctionSnapshotAt(snapshot) ?? "Not provided"],
     ["Auction Fetch Last Success", snapshot.auctionPrices?.fetchedAt ?? ""],
     [
@@ -505,7 +513,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Auction prices",
-      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; output prices also show buyout quantity listed. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield minus Materials AH / Craft (a range for variable yields), before the auction house cut and deposit; it is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times, fetch diagnostics and numeric copper values are hidden/available in CSV. Item-ID matching does not distinguish random bonuses.",
+      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; output prices also show buyout quantity listed. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield, less the configured auction house cut (see AH Margin Basis on Guild Info), minus Materials AH / Craft; a range for variable yields. Listing deposits are excluded because they are refunded on sale but lost if the auction expires. It is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times, fetch diagnostics and numeric copper values are hidden/available in CSV. Item-ID matching does not distinguish random bonuses.",
     ],
     [
       "Public links",

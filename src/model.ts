@@ -130,6 +130,9 @@ export const auctionMarketSchema = z
     houseId: z.number().int().positive().max(1_000_000),
     verifiedAt: z.iso.datetime(),
     verification: z.literal("in-game-listings"),
+    // Seller's cut on a completed sale, e.g. 5 for faction houses per client
+    // AuctionHouse.ConsignmentRate. Omitted means margins are shown before the cut.
+    saleCutPercent: z.number().min(0).max(100).optional(),
   })
   .strict();
 export type AuctionMarket = z.infer<typeof auctionMarketSchema>;
