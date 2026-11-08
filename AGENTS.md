@@ -28,7 +28,11 @@ Tab order is Characters, Professions, Recipes, Guild Info, Automated Export Info
 
 A guild lookup/auth failure must not publish an empty successful roster. Individual endpoint failures keep prior/supplied data and mark it incomplete. Keep last-success timestamps when values are retained. `Generated At`/fetch times must not be represented as Blizzard update times.
 
-Notes is human-owned: never import it from CSV/API/config. Google updates require app ownership metadata and preserve Notes by identity. Stop before deleting notes for a departed/unidentified character. Unrelated tabs are outside the write scope. Google writes use a single atomic batch and are not retried after ambiguous failure. External publication must be requested; a code/PR task does not authorize publishing real guild data.
+Notes is human-owned: never import it from CSV/API/config. Google updates require app ownership metadata and preserve Notes by identity. Stop before deleting notes for a departed/unidentified character. Unrelated tabs are outside the write scope. Google writes use a single atomic batch and are not retried after ambiguous failure. External publication requires an explicit request or the standing post-merge authorization below; an unmerged code/PR task alone does not authorize publishing real guild data.
+
+## After landing a PR
+
+Whenever a PR is confirmed merged into this repository's main branch, automatically apply [post-merge-refresh](.agents/skills/post-merge-refresh/SKILL.md) before the final handoff, including docs-only PRs. The owner has authorized refreshing the existing private guild data, regenerating exports, publishing the already-configured spreadsheet and returning its clickable link without another permission request. Preserve human notes/manual tabs. Honor any later instruction to skip publishing or work offline. If refresh or publication fails, report the failure and link the existing sheet without claiming it was updated. The skill does not grant permission to merge a PR.
 
 ## Checks and evidence
 
