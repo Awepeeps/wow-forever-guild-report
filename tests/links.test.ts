@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 import { strFromU8, unzipSync } from "fflate";
 import { HttpClient } from "../src/http.ts";
-import { armoryUrl, assertPublicLink, recipeUrl } from "../src/links.ts";
+import {
+  armoryUrl,
+  assertPublicLink,
+  recipeUrl,
+  upstreamRepositoryUrl,
+} from "../src/links.ts";
 import {
   recipeMappingFromCsv,
   withRecipeMapping,
@@ -17,9 +22,13 @@ test("public links use encoded Forever slugs and validated Wowhead spell IDs", (
   const url = recipeUrl(72001);
   expect(url).toBe("https://www.wowhead.com/forever/spell=72001");
   expect(() => assertPublicLink(url)).not.toThrow();
+  expect(() => assertPublicLink(upstreamRepositoryUrl)).not.toThrow();
   expect(() => assertPublicLink(armoryUrl("eu", "élise-o’neil"))).not.toThrow();
   for (const target of [
     "javascript:alert(1)",
+    "https://github.com/deathpie/wow-forever-guild-report",
+    `${upstreamRepositoryUrl}?token=private`,
+    `${upstreamRepositoryUrl}/issues`,
     "https://www.wowhead.com/forever/search?q=a&q=b",
     "file:///etc/passwd",
     "http://www.wowhead.com/forever/search?q=Example",
@@ -64,6 +73,12 @@ test("XLSX hyperlinks are validated relationships, CSV keeps URLs, and Sheets li
     ),
   );
   const files = unzipSync(toXlsx(tables));
+  const sourceLinks = strFromU8(
+    files["xl/worksheets/_rels/sheet5.xml.rels"] ?? new Uint8Array(),
+  );
+  expect(sourceLinks).toContain(`Target="${upstreamRepositoryUrl}"`);
+  const info = tables.find((t) => t.name === "Automated Export Info");
+  expect(toCsv(info?.rows ?? [])).toContain(upstreamRepositoryUrl);
   const xlsx = strFromU8(files["xl/worksheets/sheet1.xml"] ?? new Uint8Array());
   expect(xlsx).toContain('<hyperlink ref="B2" r:id="link1"/>');
   const recipes = strFromU8(

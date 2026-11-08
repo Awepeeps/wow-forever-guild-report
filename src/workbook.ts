@@ -8,6 +8,7 @@ import {
   armoryUrl,
   type PublicLink,
   recipeUrl,
+  upstreamRepositoryUrl,
   validatedLinks,
 } from "./links.ts";
 import {
@@ -273,6 +274,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
   }
   const reference: Cell[][] = [
     ["Topic", "Details"],
+    ["Source code (upstream)", upstreamRepositoryUrl],
     [
       "Layout",
       "Characters is the roster overview; Professions has one row per character with primary/secondary skills and tiers in separate cells. Both sort by numeric guild rank, Discord, then character name. Shading marks contiguous player groups; rank-first order can split one player's characters across ranks. Guild Info shows the export timestamp. Technical identity, status, generation and last-success columns are hidden by default and can be unhidden. CSV files include all columns.",
@@ -328,7 +330,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Public links",
-      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open exact Wowhead Forever crafting spell pages using a build-pinned SkillLineAbility.ID → Spell table from wago.tools. Blizzard recipe IDs are never treated as spell IDs or matched by name. Unmapped recipes have no link and are labelled for a mapping update; no search links are substituted. Guild Info records the mapping build, source hash and fetch time. Hidden spell-ID/URL columns keep targets in CSV. Links use HTTPS on these two trusted hosts; arbitrary API URLs are never emitted. Only Sheets Last Login uses the fixed generated relative-date formula; raw data stays literal.",
+      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open exact Wowhead Forever crafting spell pages using a build-pinned SkillLineAbility.ID → Spell table from wago.tools. Blizzard recipe IDs are never treated as spell IDs or matched by name. Unmapped recipes have no link and are labelled for a mapping update; no search links are substituted. Guild Info records the mapping build, source hash and fetch time. Hidden spell-ID/URL columns keep targets in CSV. Source code (upstream) links to the public GitHub repository that generates this export. Hyperlinks are restricted to the approved HTTPS Armory/Wowhead routes and that exact repository; arbitrary API URLs are never emitted. Only Sheets Last Login uses the fixed generated relative-date formula; raw data stays literal.",
     ],
     [
       "Forever API research (community; US routes verified 2026-11-07)",
@@ -374,7 +376,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
         ),
     },
     { name: "Guild Info", rows: guild },
-    { name: "Automated Export Info", rows: reference },
+    {
+      name: "Automated Export Info",
+      rows: reference,
+      links: [{ row: 1, column: 1, url: upstreamRepositoryUrl }],
+    },
   ];
 }
 
