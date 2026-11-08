@@ -62,6 +62,19 @@ export interface Table {
   tones?: CellTone[];
 }
 
+function notesLast(rows: Cell[][]): void {
+  const index = rows[0]?.indexOf(playerNotesHeader) ?? -1;
+  if (index < 0) throw new Error("Player notes column missing");
+  for (const row of rows) row.push(...row.splice(index, 1));
+}
+
+function armoryLinks(rows: Cell[][]): PublicLink[] {
+  const column = rows[0]?.indexOf("Armory URL") ?? -1;
+  return rows
+    .slice(1)
+    .map((row, i) => ({ row: i + 1, column: 1, url: String(row[column]) }));
+}
+
 export function buildTables(snapshot: Snapshot): Table[] {
   const characters: Cell[][] = [
     [
@@ -216,6 +229,9 @@ export function buildTables(snapshot: Snapshot): Table[] {
       armoryUrl(snapshot.region, c.slug),
     ]);
   }
+  // The human-owned column is always last, so everything before it is visibly
+  // generated and everything after the generated block belongs to players.
+  for (const table of [characters, professions]) notesLast(table);
   const recipeEntries = knownRecipes(snapshot);
   const recipeItemLists: ItemLinkList[] = [];
   const recipeTones: CellTone[] = [];
@@ -476,7 +492,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Manual fields",
-      "Discord names come from a private JSON map. Player Notes (Editable) is human-owned on Characters and Professions. Each tab keeps its own notes by character identity; notes are never imported from CSV, config or API.",
+      "Discord names come from a private JSON map. Player Notes (Editable) is human-owned and always the last column on Characters and Professions; every column before it is generated. Each tab keeps its own notes by character identity; notes are never imported from CSV, config or API.",
     ],
     [
       "Availability",
@@ -540,16 +556,12 @@ export function buildTables(snapshot: Snapshot): Table[] {
             ]
           : [];
       }),
-      links: characters
-        .slice(1)
-        .map((row, i) => ({ row: i + 1, column: 1, url: String(row.at(-1)) })),
+      links: armoryLinks(characters),
     },
     {
       name: "Professions",
       rows: professions,
-      links: professions
-        .slice(1)
-        .map((row, i) => ({ row: i + 1, column: 1, url: String(row.at(-1)) })),
+      links: armoryLinks(professions),
     },
     {
       name: "Recipes",

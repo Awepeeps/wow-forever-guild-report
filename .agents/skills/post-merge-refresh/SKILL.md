@@ -27,13 +27,13 @@ Handle the refresh result explicitly; do not blindly chain publishing with `&&`:
 - **Exit 2:** validate the new partial snapshot, retain the component/status/last-success labels, and continue publishing it. Summarize incomplete components in the final response. Partial data is expected when individual character APIs are unavailable.
 - **Exit 1 or an unexpected result:** stop publication. Do not publish an older snapshot as if it came from this run. Report the failure and link to the existing spreadsheet, clearly marked as not updated.
 
-Before publishing, privately record editable notes by character identity and the manual tabs needed for the preservation comparison. Run `just sheets <output-directory>/snapshot.json` only for the newly regenerated snapshot. Preserve independent Player Notes (Editable) values and formats on Characters and Professions. Update only the five owned export tabs; Useful Info and Guides, Guide Suggestions (Manual), and other human tabs stay outside exporter ownership. Do not recreate or repopulate the one-time guide suggestions.
+Before publishing, privately record editable notes by character identity for the preservation comparison. Run `just sheets <output-directory>/snapshot.json` only for the newly regenerated snapshot. Preserve independent Player Notes (Editable) values and formats on Characters and Professions. Update only the five owned export tabs. Every other tab (currently Useful Info and Guides) is human-maintained and outside exporter ownership: the owner may edit, rename, add or delete such tabs at any time, including during publication. Do not compare their contents or report their changes as publication failures, and never recreate a deleted human tab.
 
 On an ownership/note-preservation error, stop and report it; do not bypass the guard. A Google write uses one atomic batch without retries. If its outcome is ambiguous, inspect the live workbook before deciding whether any further write is necessary; do not replay it blindly.
 
 ## Verify and return the link
 
-Read back the live workbook after a successful write. Confirm the five owned tab names/order, current headers and row counts, and Guild Info's Generated At against the new snapshot. Check that editable notes still follow character identities and manual tabs remain unchanged, using a private pre-publish read when comparison is needed. Save any detailed evidence only under ignored private paths; report counts and outcomes rather than note text or raw roster rows.
+Read back the live workbook after a successful write. Confirm the five owned tab names/order, current headers and row counts, and Guild Info's Generated At against the new snapshot. Check that editable notes still follow character identities and remain the final column on Characters and Professions, using a private pre-publish read when comparison is needed. Save any detailed evidence only under ignored private paths; report counts and outcomes rather than note text or raw roster rows.
 
 End the handoff with a clickable link constructed from the validated configured spreadsheet ID:
 
