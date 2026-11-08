@@ -46,8 +46,11 @@ import-csv input output=".local/roster.json":
 export config=".local/roster.json" out="output/export":
     bun run cli export --config {{quote(config)}} --out {{quote(out)}}
 
-refresh config=".local/roster.json" out="output/roster":
-    bun run cli refresh --config {{quote(config)}} --out {{quote(out)}}
+refresh config=".local/roster.json" out="output/roster" recipe_map="":
+    bun run cli refresh --config {{quote(config)}} --out {{quote(out)}} {{if recipe_map == "" { "" } else { "--recipe-map " + quote(recipe_map) }}}
+
+recipe-map build output=".local/recipe-map.json":
+    bun run cli recipe-map --build {{quote(build)}} --out {{quote(output)}}
 
 sheets snapshot="output/roster/snapshot.json":
     bun run cli sheets --snapshot {{quote(snapshot)}}

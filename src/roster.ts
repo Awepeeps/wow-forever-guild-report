@@ -128,6 +128,7 @@ export async function refreshRoster(
             name: c.name,
             ...(c.id === undefined ? {} : { id: c.id }),
             ...(c.level === undefined ? {} : { level: c.level }),
+            ...(c.class ? { class: c.class } : {}),
             ...(c.guildRank === undefined ? {} : { guildRank: c.guildRank }),
           }
         : c,

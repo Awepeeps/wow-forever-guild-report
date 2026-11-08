@@ -193,10 +193,13 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Knower Data",
       "Recipe ID",
       "Generated At",
+      "Wowhead Link",
+      "Wowhead Spell ID",
       "Recipe URL",
     ],
   ];
   for (const recipe of recipeEntries) {
+    const spellId = snapshot.recipeMapping?.spells[String(recipe.id)];
     const status = recipe.knowers.some((r) => r.status === "retained")
       ? "Includes retained data"
       : recipe.knowers.some((r) => r.status === "manual")
@@ -210,7 +213,9 @@ export function buildTables(snapshot: Snapshot): Table[] {
         status,
         recipe.id,
         snapshot.generatedAt,
-        recipeUrl(recipe.name),
+        spellId === undefined ? "Unmapped — update recipe map" : "Exact spell",
+        spellId ?? "",
+        spellId === undefined ? "" : recipeUrl(spellId),
       ]);
   }
   const guild: Cell[][] = [
@@ -221,6 +226,19 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ["Characters", snapshot.rows.length],
     ["Discord Mapped", snapshot.rows.filter((r) => r.discord).length],
     ["Known Recipes (distinct profession + ID)", recipeEntries.length],
+    [
+      "Wowhead Exact Recipe Links",
+      recipeEntries.filter(
+        (r) => snapshot.recipeMapping?.spells[String(r.id)] !== undefined,
+      ).length,
+    ],
+    ["Recipe Mapping Build", snapshot.recipeMapping?.build ?? "Not loaded"],
+    [
+      "Recipe Mapping Source",
+      snapshot.recipeMapping ? snapshot.recipeMapping.source : "Not loaded",
+    ],
+    ["Recipe Mapping SHA-256", snapshot.recipeMapping?.sha256 ?? ""],
+    ["Recipe Mapping Fetched At", snapshot.recipeMapping?.fetchedAt ?? ""],
     [
       "Recipe Coverage (current / characters)",
       `${snapshot.rows.filter((r) => recipeCoverage(r) === "Current").length} / ${snapshot.rows.length}`,
@@ -310,7 +328,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Public links",
-      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open a Wowhead Forever name search: Blizzard recipe IDs are not Wowhead spell IDs, so an exact spell link cannot safely be inferred. Hidden URL columns keep link targets in CSV. Links use HTTPS on these two trusted hosts; hyperlink formulas and arbitrary API URLs are never emitted. Only Sheets Last Login uses the fixed generated relative-date formula; raw data stays literal.",
+      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open exact Wowhead Forever crafting spell pages using a build-pinned SkillLineAbility.ID → Spell table from wago.tools. Blizzard recipe IDs are never treated as spell IDs or matched by name. Unmapped recipes have no link and are labelled for a mapping update; no search links are substituted. Guild Info records the mapping build, source hash and fetch time. Hidden spell-ID/URL columns keep targets in CSV. Links use HTTPS on these two trusted hosts; arbitrary API URLs are never emitted. Only Sheets Last Login uses the fixed generated relative-date formula; raw data stays literal.",
     ],
     [
       "Forever API research (community; US routes verified 2026-11-07)",
@@ -349,7 +367,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
       rows: recipes,
       links: recipes
         .slice(1)
-        .map((row, i) => ({ row: i + 1, column: 1, url: String(row.at(-1)) })),
+        .flatMap((row, i) =>
+          row.at(-1)
+            ? [{ row: i + 1, column: 1, url: String(row.at(-1)) }]
+            : [],
+        ),
     },
     { name: "Guild Info", rows: guild },
     { name: "Automated Export Info", rows: reference },

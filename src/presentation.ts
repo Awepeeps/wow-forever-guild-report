@@ -107,6 +107,7 @@ export function columnPresentation(
     "Guild Rank Number",
     "Recipe Coverage",
     "Recipe ID",
+    "Wowhead Spell ID",
     "Recipe URL",
     "Armory URL",
     "Average ilvl",

@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { snapshotSchema } from "../src/model.ts";
+import { configSchema, snapshotSchema } from "../src/model.ts";
+import { recipeMappingFromCsv } from "../src/recipe-mapping.ts";
 import { snapshot } from "./helpers.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -58,6 +59,109 @@ async function run(
   ]);
   return { stdout, stderr, code };
 }
+
+test("CLI persists the full pinned recipe map for later learned recipes and refuses replacing its map file", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "recipe-map-cli-"));
+  try {
+    await Bun.write(
+      join(directory, ".env.schema"),
+      Bun.file(join(root, ".env.schema")),
+    );
+    const path = join(directory, "config.json"),
+      mappingPath = join(directory, "recipe-map.json"),
+      out = join(directory, "output");
+    const mapping = recipeMappingFromCsv(
+      "ID,Spell\n42001,72001\n42002,72002\n",
+      "1.60.1.70862",
+    );
+    await Bun.write(mappingPath, JSON.stringify(mapping));
+    const config = configSchema.parse({
+      version: 1,
+      region: "us",
+      characters: [
+        {
+          name: "Example Crafter",
+          slug: "example-crafter",
+          primary: [
+            {
+              name: "Alchemy",
+              recipes: [{ id: 42001, name: "Invented Tonic" }],
+            },
+          ],
+        },
+      ],
+    });
+    await Bun.write(path, JSON.stringify(config));
+    const first = await run(directory, [
+      "export",
+      "--config",
+      path,
+      "--out",
+      out,
+      "--recipe-map",
+      mappingPath,
+    ]);
+    expect(first.code).toBe(0);
+    expect(await readFile(join(out, "recipes.csv"), "utf8")).toContain(
+      "spell=72001",
+    );
+    const row = config.characters[0];
+    if (!row) throw new Error("fixture");
+    row.primary = [
+      { name: "Alchemy", recipes: [{ id: 42002, name: "Invented Tonic" }] },
+    ];
+    await Bun.write(path, JSON.stringify(config));
+    const next = await run(directory, [
+      "export",
+      "--config",
+      path,
+      "--out",
+      out,
+    ]);
+    expect(next.code).toBe(0);
+    expect(await readFile(join(out, "recipes.csv"), "utf8")).toContain(
+      "spell=72002",
+    );
+    const saved = snapshotSchema.parse(
+      JSON.parse(await readFile(join(out, "snapshot.json"), "utf8")),
+    );
+    expect(saved.recipeMapping?.spells["42001"]).toBe(72001);
+    expect(saved.recipeMapping?.build).toBe(mapping.build);
+    const original = await readFile(mappingPath, "utf8");
+    const refused = await run(directory, [
+      "recipe-map",
+      "--build",
+      mapping.build,
+      "--out",
+      mappingPath,
+    ]);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("already exists");
+    expect(await readFile(mappingPath, "utf8")).toBe(original);
+    await Bun.write(
+      mappingPath,
+      JSON.stringify({
+        ...mapping,
+        spells: { "42002": "https://private-input.invalid" },
+      }),
+    );
+    const before = await readFile(join(out, "snapshot.json"), "utf8");
+    const invalid = await run(directory, [
+      "export",
+      "--config",
+      path,
+      "--out",
+      out,
+      "--recipe-map",
+      mappingPath,
+    ]);
+    expect(invalid.code).toBe(1);
+    expect(invalid.stderr).not.toContain("private-input");
+    expect(await readFile(join(out, "snapshot.json"), "utf8")).toBe(before);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30_000);
 
 test("real Varlock CLI exports a private workbook and fails refresh before touching outputs when credentials are missing", async () => {
   const directory = await mkdtemp(join(tmpdir(), "roster-cli-"));

@@ -1,14 +1,13 @@
 import { SafeError } from "./http.ts";
-import { regionSchema, slugSchema } from "./model.ts";
+import { regionSchema, slugSchema, spellIdSchema } from "./model.ts";
 
 export function armoryUrl(region: string, slug: string): string {
   return `https://worldofwarcraft.blizzard.com/en-us/forever/${regionSchema.parse(region)}/armory/character/${encodeURIComponent(slugSchema.parse(slug))}`;
 }
 
-// Blizzard recipe IDs are SkillLineAbility IDs, not Wowhead spell IDs. A name
-// search is deterministic without maintaining a separate client-data mapping.
-export function recipeUrl(name: string): string {
-  return `https://www.wowhead.com/forever/search?q=${encodeURIComponent(name)}`;
+// Only a mapped Spell ID belongs here; a Blizzard recipe ID is a different ID space.
+export function recipeUrl(spellId: number): string {
+  return `https://www.wowhead.com/forever/spell=${spellIdSchema.parse(spellId)}`;
 }
 
 export function assertPublicLink(value: string): void {
@@ -35,6 +34,13 @@ export function assertPublicLink(value: string): void {
       )
         return;
     }
+    if (
+      url.hostname === "www.wowhead.com" &&
+      !url.search &&
+      /^\/forever\/spell=[1-9]\d{0,9}$/.test(url.pathname) &&
+      spellIdSchema.safeParse(Number(url.pathname.split("=")[1])).success
+    )
+      return;
     if (
       url.hostname === "www.wowhead.com" &&
       url.pathname === "/forever/search" &&

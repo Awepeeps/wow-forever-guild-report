@@ -162,6 +162,20 @@ export const rowSchema = z
   })
   .strict();
 export type RosterRow = z.infer<typeof rowSchema>;
+export const foreverBuildSchema = z.string().regex(/^1\.60\.\d{1,3}\.\d{4,6}$/);
+export const spellIdSchema = z.number().int().positive().max(2_147_483_647);
+export const recipeMappingSchema = z
+  .object({
+    build: foreverBuildSchema,
+    source: z.literal("wago.tools/SkillLineAbility"),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    fetchedAt: z.iso.datetime(),
+    spells: z
+      .record(z.string().regex(/^[1-9]\d{0,9}$/), spellIdSchema)
+      .refine((entries) => Object.keys(entries).length <= 20_000),
+  })
+  .strict();
+export type RecipeMapping = z.infer<typeof recipeMappingSchema>;
 export const snapshotSchema = z
   .object({
     version: z.literal(1),
@@ -169,6 +183,7 @@ export const snapshotSchema = z
     generatedAt: z.iso.datetime(),
     guild: z.string().nullable(),
     guildRankNames: guildRankNamesSchema,
+    recipeMapping: recipeMappingSchema.optional(),
     rows: z.array(rowSchema).max(2_000),
   })
   .strict()

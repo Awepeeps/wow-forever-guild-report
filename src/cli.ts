@@ -11,9 +11,11 @@ import {
   discordMapSchema,
   hasRetainedRecipes,
   manualSnapshot,
+  recipeMappingSchema,
   regionSchema,
   snapshotSchema,
 } from "./model.ts";
+import { downloadRecipeMapping, withRecipeMapping } from "./recipe-mapping.ts";
 import { refreshRoster } from "./roster.ts";
 import { googleToken, publishSheets } from "./sheets.ts";
 import { buildTables } from "./workbook.ts";
@@ -25,11 +27,14 @@ const help = `WoW Forever Guild Report — guild profession workbooks (Bun + Var
   just export [config] [output-directory]   Offline, supplied data only
   just import-csv input.csv [output.json]   Writes config and sibling discord-map.json
   just sheets [snapshot.json]              Updates five tool-owned tabs; preserves Player Notes (Editable)
+  just recipe-map <client-build> [output.json]   Imports a pinned recipe → spell table
 
-Direct CLI: bun run cli <refresh|export|import|sheets> [options]
+Direct CLI: bun run cli <refresh|export|import|sheets|recipe-map> [options]
   --config .local/roster.json   --out output/roster
   --input roster.csv          --region us
   --snapshot output/roster/snapshot.json
+  --recipe-map .local/recipe-map.json      Optional for refresh/export; retained in snapshots
+  --build 1.60.1.70862                    Required for recipe-map
 
 Secrets: .env.local via Varlock; Discord mapping: DISCORD_MAP_FILE.
 Refresh exit 2 means partial data exported; 1 means the command failed.
@@ -44,6 +49,8 @@ async function main(): Promise<void> {
         input: { type: "string" };
         region: { type: "string" };
         snapshot: { type: "string" };
+        "recipe-map": { type: "string" };
+        build: { type: "string" };
         help: { type: "boolean" };
       };
       allowPositionals: true;
@@ -59,6 +66,8 @@ async function main(): Promise<void> {
         input: { type: "string" },
         region: { type: "string" },
         snapshot: { type: "string" },
+        "recipe-map": { type: "string" },
+        build: { type: "string" },
         help: { type: "boolean" },
       },
     });
@@ -73,6 +82,20 @@ async function main(): Promise<void> {
   }
   if (positionals.length !== 1)
     throw new SafeError("Use named options for CLI paths. See --help.");
+  if (command === "recipe-map") {
+    if (!values.build) throw new SafeError("Recipe mapping requires --build.");
+    const path = values.out ?? ".local/recipe-map.json";
+    if (await Bun.file(path).exists())
+      throw new SafeError(
+        "Recipe mapping output already exists. Choose a new path to preserve the pinned mapping.",
+      );
+    const mapping = await downloadRecipeMapping(values.build);
+    await atomicWrite(path, `${JSON.stringify(mapping, null, 2)}\n`);
+    console.log(
+      `Imported ${Object.keys(mapping.spells).length} recipe-to-spell mappings for Forever build ${mapping.build}.`,
+    );
+    return;
+  }
   if (command === "import") {
     if (!values.input) throw new SafeError("Import requires --input CSV path.");
     let csv: string;
@@ -139,6 +162,9 @@ async function main(): Promise<void> {
   const previous = (await Bun.file(previousPath).exists())
     ? await readJson(previousPath, snapshotSchema)
     : undefined;
+  const recipeMapping = values["recipe-map"]
+    ? await readJson(values["recipe-map"], recipeMappingSchema)
+    : previous?.recipeMapping;
   if (
     command === "export" &&
     previous?.rows.some((row) =>
@@ -166,6 +192,7 @@ async function main(): Promise<void> {
       previous,
     );
   }
+  if (recipeMapping) snapshot = withRecipeMapping(snapshot, recipeMapping);
   await writeExports(snapshot, outputDirectory);
   const incomplete = snapshot.rows.filter(
     (r) =>

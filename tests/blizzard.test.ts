@@ -282,3 +282,77 @@ test("professions preserve known recipe IDs/names per tier and distinguish omitt
     "unsupported shape",
   );
 });
+
+test("guild class references resolve through the Forever class index even when character APIs return 404", async () => {
+  for (const classIndexFails of [false, true]) {
+    const urls: string[] = [];
+    const client = new BlizzardClient(
+      { region: "us", locale: "en_US" },
+      { clientId: "test-id", clientSecret: "test-secret" },
+      new HttpClient(async (input) => {
+        const url = new URL(input);
+        urls.push(url.toString());
+        if (url.pathname.endsWith("/token"))
+          return Response.json({
+            access_token: "test-token",
+            expires_in: 3600,
+          });
+        if (url.pathname === "/data/wow/playable-class/index") {
+          expect(url.searchParams.get("namespace")).toBe("static-forever-us");
+          return classIndexFails
+            ? new Response(null, { status: 404 })
+            : Response.json({ classes: [{ id: 101, name: "Invented Class" }] });
+        }
+        expect(url.searchParams.get("namespace")).toBe("profile-forever-us");
+        if (url.pathname.endsWith("/roster"))
+          return Response.json({
+            members: [
+              {
+                rank: 2,
+                character: {
+                  id: 10101,
+                  name: "Example",
+                  surname: "Member",
+                  slug: "example-member",
+                  level: 12,
+                  playable_class: {
+                    id: 101,
+                    key: { href: "https://untrusted.invalid/never-follow" },
+                  },
+                },
+              },
+              {
+                rank: 2,
+                character: {
+                  id: 10102,
+                  name: "Another",
+                  surname: "Member",
+                  slug: "another-member",
+                  level: 5,
+                  playable_class: { id: 102 },
+                },
+              },
+            ],
+          });
+        return new Response(null, { status: 404 });
+      }),
+    );
+    const result = await refreshRoster(
+      configSchema.parse({ version: 1, region: "us", guild: "example-guild" }),
+      {},
+      client,
+    );
+    const row = result.rows.find((r) => r.character.slug === "example-member");
+    expect(row?.character.class).toBe(classIndexFails ? "" : "Invented Class");
+    expect(row?.profileStatus).toBe("unavailable");
+    expect(row?.profileFetchedAt).toBeNull();
+    expect(
+      result.rows.find((r) => r.character.slug === "another-member")?.character
+        .class,
+    ).toBe("");
+    expect(
+      urls.filter((u) => u.includes("/playable-class/index")),
+    ).toHaveLength(1);
+    expect(urls.some((u) => u.includes("untrusted.invalid"))).toBe(false);
+  }
+});
