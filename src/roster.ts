@@ -257,6 +257,7 @@ export async function refreshRoster(
     guild: config.guild ?? null,
     reportTimeZone: config.reportTimeZone,
     guildRankNames: config.guildRankNames,
+    ...(config.auctionMarket ? { auctionMarket: config.auctionMarket } : {}),
     generatedAt: fetchedAt,
     rows,
   };

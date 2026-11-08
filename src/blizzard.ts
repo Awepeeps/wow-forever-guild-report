@@ -1,8 +1,13 @@
 import { z } from "zod";
 import { ApiError, HttpClient, SafeError } from "./http.ts";
 import {
+  type AuctionBook,
+  type AuctionMarket,
+  auctionBookSchema,
+  auctionMarketSchema,
   type Character,
   characterSchema,
+  itemIdSchema,
   type Profession,
   type RecipeDetails,
   type RosterConfig,
@@ -122,6 +127,33 @@ const talentsSchema = z.object({
     )
     .max(10),
 });
+const auctionQuantity = z
+  .number()
+  .int()
+  .positive()
+  .max(Number.MAX_SAFE_INTEGER);
+const auctionMoney = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
+const auctionListing = z.object({
+  id: auctionQuantity,
+  item: z.object({ id: itemIdSchema }),
+  quantity: auctionQuantity,
+  buyout: auctionMoney.optional(),
+});
+const commodityListing = auctionListing
+  .omit({ buyout: true })
+  .extend({ unit_price: auctionMoney });
+
+function modifiedAt(header: string | null): string | null {
+  if (header === null) return null;
+  const time = Date.parse(header);
+  if (!Number.isFinite(time))
+    throw new SafeError("Blizzard auction snapshot time is invalid.");
+  return new Date(time).toISOString();
+}
 
 function parseApi<T>(schema: z.ZodType<T>, data: unknown, label: string): T {
   const result = schema.safeParse(data);
@@ -204,8 +236,15 @@ export class BlizzardClient {
 
   private async get(
     path: string,
-    namespace: "profile" | "static" = "profile",
+    namespace: "profile" | "static" | "dynamic" = "profile",
   ): Promise<unknown> {
+    return (await this.getResponse(path, namespace)).data;
+  }
+
+  private async getResponse(
+    path: string,
+    namespace: "profile" | "static" | "dynamic",
+  ): Promise<{ data: unknown; lastModified: string | null }> {
     const url = new URL(
       `https://${this.config.region}.api.blizzard.com${path}`,
     );
@@ -214,9 +253,103 @@ export class BlizzardClient {
       `${namespace}-forever-${this.config.region}`,
     );
     url.searchParams.set("locale", this.config.locale);
-    return this.http.json("Blizzard API", url, {
+    return this.http.jsonWithMetadata("Blizzard API", url, {
       headers: { Authorization: `Bearer ${await this.accessToken()}` },
     });
+  }
+
+  async auctionPrices(input: AuctionMarket): Promise<AuctionBook> {
+    const market = auctionMarketSchema.parse(input);
+    const prefix = `/data/wow/ruleset/${market.rulesetId}`;
+    const ruleset = parseApi(
+      z.object({ id: z.number().int(), name: z.string() }),
+      await this.get(prefix, "dynamic"),
+      "auction ruleset",
+    );
+    if (ruleset.id !== market.rulesetId || ruleset.name !== market.rulesetName)
+      throw new SafeError(
+        "Blizzard auction ruleset does not match the verified market.",
+      );
+    const index = parseApi(
+      z.object({
+        auctions: z
+          .array(z.object({ id: z.number().int(), name: z.string() }))
+          .max(100),
+      }),
+      await this.get(`${prefix}/auctions/`, "dynamic"),
+      "auction index",
+    );
+    const expectedName = `${market.faction} Auction House`;
+    if (
+      !index.auctions.some(
+        (h) => h.id === market.houseId && h.name === expectedName,
+      )
+    )
+      throw new SafeError(
+        "Blizzard auction house does not match the verified market.",
+      );
+    const base = `${prefix}/auctions/${market.houseId}`;
+    const [regularResponse, commodityResponse] = await Promise.all([
+      this.getResponse(base, "dynamic"),
+      this.getResponse(`${base}/commodities`, "dynamic"),
+    ]);
+    const regular = parseApi(
+      z.object({
+        id: z.number().int(),
+        name: z.string(),
+        auctions: z.array(auctionListing).max(500_000).optional(),
+      }),
+      regularResponse.data,
+      "auction listings",
+    );
+    const commodities = parseApi(
+      z.object({ auctions: z.array(commodityListing).max(500_000).optional() }),
+      commodityResponse.data,
+      "commodity listings",
+    );
+    if (regular.id !== market.houseId || regular.name !== expectedName)
+      throw new SafeError(
+        "Blizzard auction listings belong to a different market.",
+      );
+    const items: AuctionBook["items"] = {};
+    const ids = new Set<number>();
+    function add(
+      id: number,
+      itemId: number,
+      quantity: number,
+      unitCopper: number | undefined,
+    ) {
+      if (ids.has(id))
+        throw new SafeError(
+          "Blizzard auction data contains duplicate listing identities.",
+        );
+      ids.add(id);
+      if (unitCopper === undefined || unitCopper <= 0) return;
+      const key = String(itemId),
+        old = items[key];
+      items[key] = {
+        unitCopper: Math.min(old?.unitCopper ?? unitCopper, unitCopper),
+        quantity: (old?.quantity ?? 0) + quantity,
+      };
+    }
+    for (const a of regular.auctions ?? [])
+      add(
+        a.id,
+        a.item.id,
+        a.quantity,
+        a.buyout === undefined ? undefined : a.buyout / a.quantity,
+      );
+    for (const a of commodities.auctions ?? [])
+      add(a.id, a.item.id, a.quantity, a.unit_price);
+    return parseApi(
+      auctionBookSchema,
+      {
+        auctionsUpdatedAt: modifiedAt(regularResponse.lastModified),
+        commoditiesUpdatedAt: modifiedAt(commodityResponse.lastModified),
+        items,
+      },
+      "normalized auction prices",
+    );
   }
 
   async guild(slug: string): Promise<Character[]> {

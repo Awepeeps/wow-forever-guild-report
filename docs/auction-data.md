@@ -1,7 +1,8 @@
 # Forever auction data
 
 Research checked 2026-11-08 against US Blizzard endpoints and client build
-`1.60.1.70862`. Auction pricing is not enabled by this change.
+`1.60.1.70862`. Prices are enabled only for a market configured as `auctionMarket`
+in the private roster config (see README).
 
 ## Blizzard can supply listings
 
@@ -49,7 +50,7 @@ published Blizzard API guarantee. The independent
 [Hyjal US Roleplay Alliance market](https://hyjal.cc/auctions/us/rp-pve/alliance)
 also identifies house 119, but this does not itself prove the assignment.
 
-House 119 is therefore the candidate for US Alliance Roleplay. Before enabling
+House 119 was therefore the candidate for US Alliance Roleplay. Before enabling
 it, compare contemporaneous in-game listings (item identity, quantities and
 buyout prices) with that API house. Prefer distinctive listings or several
 items to a single common price shared by many markets. Record the evidence and
@@ -57,9 +58,17 @@ confirmed region/ruleset/faction/house in private configuration; do not hardcode
 a global assignment from these observations. Keep client downloads and any
 live evidence ignored.
 
-## Useful recipe columns after confirmation
+## Verification on 2026-11-08
 
-A first implementation could show crafted-output lowest buyout per item,
+An in-game auction-house screenshot of Frilled Lichen (item 249399) was compared
+with the commodity listings of every Alliance house about an hour old. House 119
+matched 16 price/quantity levels exactly; the other Alliance houses matched
+none. US Alliance Roleplay is therefore configured privately as ruleset 3
+(`Roleplay`), house 119. Repeat this comparison for any other market.
+
+## Recipe columns
+
+The implementation shows crafted-output lowest buyout per item,
 material unit prices, estimated material cost per craft, output quantity for
 sale, and the auction snapshot time/source/market. Divide stack buyouts by
 quantity; commodity `unit_price` is already per unit. Exclude bid-only listings

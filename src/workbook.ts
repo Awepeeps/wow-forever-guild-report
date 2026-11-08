@@ -1,5 +1,11 @@
 import { strToU8, zipSync } from "fflate";
 import {
+  auctionSnapshotAt,
+  auctionStatus,
+  materialPriceSuffix,
+  recipePrices,
+} from "./auctions.ts";
+import {
   craftingMaterials,
   craftingOutput,
   recipeDetailStatus,
@@ -213,6 +219,10 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Known By",
       "Recipe Details",
       "Knower Data",
+      "Output AH / Item",
+      "Materials AH / Craft",
+      "AH Data",
+      "AH Snapshot (UTC)",
       "Recipe ID",
       "Generated At",
       "Wowhead Link",
@@ -224,12 +234,21 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Output Maximum",
       "Makes URL",
       "Materials URLs",
+      "Output AH Copper",
+      "Materials AH Copper",
+      "Output AH Quantity",
+      "Auction House ID",
+      "Auction Last Success",
+      "Auction Last Attempt",
+      "Auctions Updated (UTC)",
+      "Commodities Updated (UTC)",
       "Recipe URL",
     ],
   ];
   for (const recipe of recipeEntries) {
     const spellId = snapshot.recipeMapping?.spells[String(recipe.id)];
     const details = snapshot.recipeDetails?.[String(recipe.id)];
+    const prices = recipePrices(snapshot, details?.data);
     const status = recipe.knowers.some((r) => r.status === "retained")
       ? "Includes retained data"
       : recipe.knowers.some((r) => r.status === "manual")
@@ -240,7 +259,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       const output = details?.data?.output;
       const materials =
         details?.data?.reagents?.map((r) => ({
-          text: `${r.quantity} × ${r.item.name}`,
+          text: `${r.quantity} × ${r.item.name}${materialPriceSuffix(snapshot, r.item.id)}`,
           url: itemUrl(r.item.id),
         })) ?? [];
       if (output)
@@ -251,10 +270,17 @@ export function buildTables(snapshot: Snapshot): Table[] {
         recipe.profession,
         recipe.name,
         craftingOutput(details?.data),
-        craftingMaterials(details?.data),
+        materials.length
+          ? materials.map((item) => item.text).join("\n")
+          : craftingMaterials(details?.data),
         chunk,
         recipeDetailStatus(details),
         status,
+        snapshot.auctionMarket ? prices.output : "Not configured",
+        snapshot.auctionMarket ? prices.materialCost : "Not configured",
+        prices.status,
+        auctionSnapshotAt(snapshot) ??
+          (snapshot.auctionMarket ? "Not provided" : ""),
         recipe.id,
         snapshot.generatedAt,
         spellId === undefined ? "Unmapped — update recipe map" : "Exact spell",
@@ -266,6 +292,14 @@ export function buildTables(snapshot: Snapshot): Table[] {
         details?.data?.quantity?.max ?? "",
         output ? itemUrl(output.id) : "",
         materials.map((item) => item.url).join("\n"),
+        prices.outputCopper ?? "",
+        prices.materialCopper ?? "",
+        prices.outputQuantity ?? "",
+        snapshot.auctionMarket?.houseId ?? "",
+        snapshot.auctionPrices?.fetchedAt ?? "",
+        snapshot.auctionPrices?.attemptedAt ?? "",
+        snapshot.auctionPrices?.data?.auctionsUpdatedAt ?? "",
+        snapshot.auctionPrices?.data?.commoditiesUpdatedAt ?? "",
         spellId === undefined ? "" : recipeUrl(spellId),
       ]);
     }
@@ -320,7 +354,24 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Auction Prices",
-      "Disabled — the guild's Roleplay auction house has not been verified. No prices from other markets are substituted.",
+      snapshot.auctionMarket
+        ? auctionStatus(snapshot)
+        : "Disabled — no verified auction market configured. No prices from other markets are substituted.",
+    ],
+    [
+      "Auction Market",
+      snapshot.auctionMarket
+        ? `${snapshot.region.toUpperCase()} / ${snapshot.auctionMarket.rulesetName} / ${snapshot.auctionMarket.faction} / house ${snapshot.auctionMarket.houseId}`
+        : "Not configured",
+    ],
+    ["Auction Market Verified At", snapshot.auctionMarket?.verifiedAt ?? ""],
+    ["AH Snapshot (UTC)", auctionSnapshotAt(snapshot) ?? "Not provided"],
+    ["Auction Fetch Last Success", snapshot.auctionPrices?.fetchedAt ?? ""],
+    [
+      "Auction Source",
+      snapshot.auctionMarket
+        ? `Blizzard dynamic-forever-${snapshot.region} auction and commodity APIs`
+        : "Not configured",
     ],
     [
       "Wowhead Exact Recipe Links",
@@ -434,7 +485,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Auction prices",
-      "Price estimates are disabled until the guild's exact auction house is verified. The Forever API lists multiple identically named houses and does not reliably identify their ruleset. Materials/output remain useful without prices; unknown prices are not treated as zero.",
+      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; output prices also show buyout quantity listed. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote or profit: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times, fetch diagnostics and numeric copper values are hidden/available in CSV. Item-ID matching does not distinguish random bonuses.",
     ],
     [
       "Public links",
