@@ -50,6 +50,7 @@ const spreadsheetSchema = z.object({
   properties: z
     .object({
       timeZone: z.string().optional(),
+      locale: z.string().optional(),
       autoRecalc: z.enum(["ON_CHANGE", "MINUTE", "HOUR"]).default("ON_CHANGE"),
     })
     .default({ autoRecalc: "ON_CHANGE" }),
@@ -543,7 +544,7 @@ export async function publishSheets(
   const parsed = spreadsheetSchema.safeParse(
     await http.json(
       "Google Sheets",
-      `${url}?fields=properties(timeZone,autoRecalc),sheets(properties(sheetId,title),developerMetadata(metadataKey,metadataValue))`,
+      `${url}?fields=properties(timeZone,autoRecalc,locale),sheets(properties(sheetId,title),developerMetadata(metadataKey,metadataValue))`,
       { headers },
     ),
   );
@@ -555,6 +556,13 @@ export async function publishSheets(
   )
     throw new SafeError(
       "Google Sheets timezone is missing; cannot safely display relative last login. No changes were made.",
+    );
+  if (
+    tables.some((t) => t.relativeDates?.length) &&
+    parsed.data.properties.locale !== "en_US"
+  )
+    throw new SafeError(
+      "Relative Last Login currently requires an en_US spreadsheet locale. Other formula locales are not yet validated; no changes were made.",
     );
   const owned = (sheet: (typeof parsed.data.sheets)[number]) =>
     sheet.developerMetadata.some(

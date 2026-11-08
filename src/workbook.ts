@@ -20,6 +20,7 @@ import {
   classStyle,
   columnPresentation,
   displayApiStatus,
+  exportHeader,
   playerGroups,
   playerNotesHeader,
 } from "./presentation.ts";
@@ -95,6 +96,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
         (row.profileFetchedAt !== null ||
           [c.class, c.race, c.faction, c.ruleset].some(Boolean) ||
           [
+            c.level,
             c.equippedItemLevel,
             c.averageItemLevel,
             c.achievementPoints,
@@ -300,7 +302,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Character metrics",
-      "iLvl is equipped item level; Average ilvl is hidden. Blank means unknown. A successful profile omitting a metric clears it; a failed profile retains prior values and last-success time. Sheets Last Login shows Today/1 day ago/N days ago with a trusted DATE/TODAY formula in the spreadsheet timezone; hourly-or-faster recalculation keeps the age current. The exact Blizzard UTC timestamp is hidden and can lag. XLSX/CSV Last Login (at export) is static at Generated At, using UTC calendar dates. Age recalculation does not fetch new Blizzard data.",
+      "iLvl is equipped item level; Average ilvl is hidden. Blank means unknown. A successful profile omitting a metric clears it; a failed profile retains prior values and last-success time. Sheets Last Login requires the validated en_US spreadsheet locale and shows Today/1 day ago/N days ago with a trusted DATE/TODAY formula in the spreadsheet timezone; unsupported locales stop before writing. Hourly-or-faster recalculation keeps the age current. The exact Blizzard UTC timestamp is hidden and can lag. XLSX/CSV Last Login (at export) is static at Generated At, using UTC calendar dates. Age recalculation does not fetch new Blizzard data.",
     ],
     [
       "Recipes",
@@ -485,10 +487,7 @@ export function toXlsx(tables: Table[]): Uint8Array {
         (row, r) =>
           `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : ["Professions", "Recipes"].includes(table.name) ? ` ht="${professionRowHeight(table, row)}" customHeight="1"` : ""}>${row
             .map((cell, c) => {
-              const output =
-                r === 0 && table.name === "Characters" && cell === "Last Login"
-                  ? "Last Login (at export)"
-                  : cell;
+              const output = r === 0 ? exportHeader(table.name, cell) : cell;
               const colorIndex =
                 c === classColumn
                   ? classNames.indexOf(String(cell).trim().toLowerCase())
@@ -514,7 +513,10 @@ export function toXlsx(tables: Table[]): Uint8Array {
         table.rows[0] ?? [""]
       )
         .map((header, c) => {
-          const presentation = columnPresentation(table.name, String(header));
+          const presentation = columnPresentation(
+            table.name,
+            String(exportHeader(table.name, header)),
+          );
           return `<col min="${c + 1}" max="${c + 1}" width="${(presentation.width / 7).toFixed(2)}" customWidth="1"${presentation.hidden ? ' hidden="1"' : ""}/>`;
         })
         .join(

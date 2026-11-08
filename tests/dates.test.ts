@@ -1,13 +1,18 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parse } from "csv-parse/sync";
 import { strFromU8, unzipSync } from "fflate";
 import {
   relativeLogin,
   relativeLoginFormula,
   validatedRelativeDates,
 } from "../src/dates.ts";
+import { writeExports } from "../src/files.ts";
 import { HttpClient } from "../src/http.ts";
 import { columnPresentation, displayApiStatus } from "../src/presentation.ts";
-import { publishSheets, sheetRequests } from "../src/sheets.ts";
+import { preservedNotes, publishSheets, sheetRequests } from "../src/sheets.ts";
 import { buildTables, toCsv, toXlsx } from "../src/workbook.ts";
 import { snapshot } from "./helpers.ts";
 
@@ -121,9 +126,9 @@ test("Sheets reads the actual spreadsheet timezone for the view-relative date wi
       body = JSON.parse(String(init.body));
       return Response.json({});
     }
-    expect(String(url)).toContain("properties(timeZone,autoRecalc)");
+    expect(String(url)).toContain("properties(timeZone,autoRecalc,locale)");
     return Response.json({
-      properties: { timeZone: "America/New_York" },
+      properties: { locale: "en_US", timeZone: "America/New_York" },
       sheets: [],
     });
   });
@@ -210,7 +215,11 @@ test("relative-date recalculation is enabled once, preserves faster settings, an
         return Response.json({});
       }
       return Response.json({
-        properties: { timeZone: "America/New_York", autoRecalc },
+        properties: {
+          locale: "en_US",
+          timeZone: "America/New_York",
+          autoRecalc,
+        },
         sheets: [],
       });
     });
@@ -232,7 +241,10 @@ test("relative-date recalculation is enabled once, preserves faster settings, an
     let writes = 0;
     const http = new HttpClient(async (_, init) => {
       if (init?.method === "POST") writes++;
-      return Response.json({ properties: { timeZone }, sheets: [] });
+      return Response.json({
+        properties: { timeZone, locale: "en_US" },
+        sheets: [],
+      });
     });
     await expect(
       publishSheets(
@@ -244,4 +256,176 @@ test("relative-date recalculation is enabled once, preserves faster settings, an
     ).rejects.toThrow("timezone");
     expect(writes).toBe(0);
   }
+});
+
+test("unverified formula locales and missing locale fail closed instead of publishing parse errors", async () => {
+  for (const locale of ["de_DE", "fr_FR", "en_GB", undefined]) {
+    let writes = 0;
+    const http = new HttpClient(async (_, init) => {
+      if (init?.method === "POST") writes++;
+      return Response.json({
+        properties: { locale, timeZone: "Europe/Berlin" },
+        sheets: [],
+      });
+    });
+    await expect(
+      publishSheets(
+        datedTables(),
+        "example-spreadsheet-id",
+        "test-token",
+        http,
+      ),
+    ).rejects.toThrow("en_US spreadsheet locale");
+    expect(writes).toBe(0);
+  }
+});
+
+test("a supplied level is retained detail when both character endpoints are unavailable", () => {
+  const base = snapshot.rows[0];
+  if (!base) throw new Error("fixture");
+  const table = buildTables({
+    ...snapshot,
+    rows: [
+      {
+        ...base,
+        profileStatus: "unavailable",
+        talentStatus: "unavailable",
+        character: { ...base.character, level: 7 },
+      },
+    ],
+  })[0];
+  expect(
+    table?.rows[1]?.[table.rows[0]?.indexOf("Character API Status") ?? -1],
+  ).toBe("Incomplete");
+});
+
+test("production file export writes static UTC relative dates, an explicit export header, and no XP", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "wow-date-export-"));
+  try {
+    const base = snapshot.rows[0];
+    if (!base) throw new Error("fixture");
+    await writeExports(
+      {
+        ...snapshot,
+        generatedAt: "2026-11-07T02:00:00.000Z",
+        rows: [
+          {
+            ...base,
+            character: {
+              ...base.character,
+              lastLoginAt: "2026-11-07T01:30:00.000Z",
+            },
+          },
+        ],
+      },
+      dir,
+    );
+    const csv = parse(
+      await readFile(join(dir, "characters.csv"), "utf8"),
+    ) as string[][];
+    const index = csv[0]?.indexOf("Last Login (at export)") ?? -1;
+    expect(index).toBeGreaterThan(-1);
+    expect(csv[1]?.[index]).toBe("Today");
+    expect(csv[0]).not.toContain("XP (API)");
+    const files = unzipSync(await readFile(join(dir, "roster.xlsx")));
+    const xml = strFromU8(
+      files["xl/worksheets/sheet1.xml"] ?? new Uint8Array(),
+    );
+    expect(xml).not.toContain("<f>");
+    expect(xml).toContain("Last Login (at export)");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("the full previous Characters layout preserves the old note and format before its column becomes a hidden timestamp", () => {
+  const table = datedTables()[0];
+  if (!table) throw new Error("fixture");
+  const oldHeaders = [
+    "Discord",
+    "Character Name",
+    "Class",
+    "Level",
+    "Guild Rank",
+    "Equipped ilvl",
+    "Average ilvl",
+    "Last Login (UTC)",
+    "Achievement Points",
+    "XP (API)",
+    "Talent Points",
+    "API Status",
+    "Player Notes (Editable)",
+    "Generated At",
+    "Ruleset",
+    "Faction",
+    "Race",
+    "Region",
+    "Character Slug",
+    "Character ID",
+    "Profile Status",
+    "Professions Status",
+    "Talents Status",
+    "Fetched At",
+    "Profile Last Success",
+    "Professions Last Success",
+    "Talents Last Success",
+    "Sync Notes",
+    "Guild Rank Number",
+    "Armory URL",
+  ];
+  const format = { textFormat: { bold: true }, backgroundColor: { red: 0.4 } };
+  const oldRow = oldHeaders.map((header) => ({
+    userEnteredValue: {
+      stringValue:
+        header === "Region"
+          ? "us"
+          : header === "Character Slug"
+            ? "example-priest"
+            : header === "Player Notes (Editable)"
+              ? "Keep this player note"
+              : "",
+    },
+    ...(header === "Player Notes (Editable)"
+      ? { userEnteredFormat: format }
+      : {}),
+  }));
+  const notes = preservedNotes(
+    [
+      {
+        values: oldHeaders.map((stringValue) => ({
+          userEnteredValue: { stringValue },
+        })),
+      },
+      { values: oldRow },
+    ],
+    table,
+  );
+  const requests = sheetRequests(
+    [table],
+    [{ sheetId: 3, title: "Characters" }],
+    { Characters: notes },
+  ) as {
+    updateCells?: {
+      range?: unknown;
+      start?: { columnIndex: number };
+      rows: {
+        values: {
+          userEnteredValue?: { stringValue?: string };
+          userEnteredFormat?: unknown;
+        }[];
+      }[];
+    };
+  }[];
+  const values = requests.find((r) => r.updateCells?.range)?.updateCells
+    ?.rows[1]?.values;
+  expect(values?.[10]?.userEnteredValue?.stringValue).toBe(
+    "Keep this player note",
+  );
+  expect(values?.[12]?.userEnteredValue?.stringValue).toBe(
+    "2026-11-07T01:30:00.000Z",
+  );
+  expect(
+    requests.find((r) => r.updateCells?.start?.columnIndex === 10)?.updateCells
+      ?.rows[0]?.values[0]?.userEnteredFormat,
+  ).toEqual(format);
 });

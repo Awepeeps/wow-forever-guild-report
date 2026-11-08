@@ -33,6 +33,14 @@ export function displayApiStatus(
 }
 
 export const playerNotesHeader = "Player Notes (Editable)";
+export function exportHeader(
+  table: string,
+  header: string | number,
+): string | number {
+  return table === "Characters" && header === "Last Login"
+    ? "Last Login (at export)"
+    : header;
+}
 export function isPlayerNotesHeader(header: unknown): boolean {
   return header === playerNotesHeader || header === "Notes";
 }
@@ -115,6 +123,7 @@ export function columnPresentation(
     "Guild Rank": 110,
     iLvl: 85,
     "Last Login": 110,
+    "Last Login (at export)": 155,
     "Achievement Points": 110,
     "Talent Points": 190,
     [playerNotesHeader]: 200,
