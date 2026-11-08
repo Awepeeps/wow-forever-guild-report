@@ -11,10 +11,13 @@ import {
 } from "./dates.ts";
 import {
   armoryUrl,
+  type ItemLinkList,
+  itemUrl,
   type PublicLink,
   recipeUrl,
   upstreamIssuesUrl,
   upstreamRepositoryUrl,
+  validatedItemLists,
   validatedLinks,
 } from "./links.ts";
 import {
@@ -39,6 +42,7 @@ export interface Table {
   name: string;
   rows: Cell[][];
   links?: PublicLink[];
+  itemLists?: ItemLinkList[];
   relativeDates?: RelativeDate[];
 }
 
@@ -197,6 +201,8 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ]);
   }
   const recipeEntries = knownRecipes(snapshot);
+  const recipeItemLists: ItemLinkList[] = [];
+  const craftedItemLinks: PublicLink[] = [];
   const recipes: Cell[][] = [
     [
       "Profession",
@@ -215,6 +221,8 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Output Item ID",
       "Output Minimum",
       "Output Maximum",
+      "Makes URL",
+      "Materials URLs",
       "Recipe URL",
     ],
   ];
@@ -226,7 +234,18 @@ export function buildTables(snapshot: Snapshot): Table[] {
       : recipe.knowers.some((r) => r.status === "manual")
         ? "Includes manual data"
         : "Current reports";
-    for (const chunk of knowerChunks(recipe.knowers))
+    for (const chunk of knowerChunks(recipe.knowers)) {
+      const row = recipes.length;
+      const output = details?.data?.output;
+      const materials =
+        details?.data?.reagents?.map((r) => ({
+          text: `${r.quantity} × ${r.item.name}`,
+          url: itemUrl(r.item.id),
+        })) ?? [];
+      if (output)
+        craftedItemLinks.push({ row, column: 2, url: itemUrl(output.id) });
+      if (materials.length)
+        recipeItemLists.push({ row, column: 3, items: materials });
       recipes.push([
         recipe.profession,
         recipe.name,
@@ -244,8 +263,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
         details?.data?.output?.id ?? "",
         details?.data?.quantity?.min ?? "",
         details?.data?.quantity?.max ?? "",
+        output ? itemUrl(output.id) : "",
+        materials.map((item) => item.url).join("\n"),
         spellId === undefined ? "" : recipeUrl(spellId),
       ]);
+    }
   }
   const guild: Cell[][] = [
     ["Metric", "Value"],
@@ -403,6 +425,10 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Makes and Materials per Craft come from Blizzard's static-forever recipe-detail endpoint, using the original recipe ID. All returned materials and quantities are preserved; ? and Unknown mean unreported, never zero. Details are cached privately for 24 hours and refreshed after a mapping-build change. Failed requests retain prior details and their original last-success time, with a visible Retained label; missing fields on successful responses become unknown. Recipe Details reports metadata availability independently of who knows it. Unhide last-success, last-attempt and output IDs/quantities for diagnostics. No vendor substitutions or Classic/Retail fallbacks are used.",
     ],
     [
+      "Crafted item and material links",
+      "Makes opens the crafted item's exact Wowhead Forever item page. Each material line opens its own item page, using the item IDs returned with crafting details. Unknown details stay unlinked. Google Sheets keeps the multiline materials cell; XLSX uses separate linked Material columns when multiple ingredients are present. CSV includes Makes URL and Materials URLs in the same order as the materials. Recipe names still open the crafting spell page.",
+    ],
+    [
       "Auction prices",
       "Price estimates are disabled until the guild's exact auction house is verified. The Forever API lists multiple identically named houses and does not reliably identify their ruleset. Materials/output remain useful without prices; unknown prices are not treated as zero.",
     ],
@@ -445,13 +471,17 @@ export function buildTables(snapshot: Snapshot): Table[] {
     {
       name: "Recipes",
       rows: recipes,
-      links: recipes
-        .slice(1)
-        .flatMap((row, i) =>
-          row.at(-1)
-            ? [{ row: i + 1, column: 1, url: String(row.at(-1)) }]
-            : [],
-        ),
+      itemLists: recipeItemLists,
+      links: [
+        ...recipes
+          .slice(1)
+          .flatMap((row, i) =>
+            row.at(-1)
+              ? [{ row: i + 1, column: 1, url: String(row.at(-1)) }]
+              : [],
+          ),
+        ...craftedItemLinks,
+      ],
     },
     { name: "Guild Info", rows: guild },
     {
@@ -521,6 +551,77 @@ function professionRowHeight(table: Table, row: Cell[]): number {
   return Math.min(409, Math.max(18, Math.max(...lines, 1) * 15 + 3));
 }
 
+// SpreadsheetML allows one hyperlink per cell. Expand the materials column in
+// XLSX only, so each ingredient has its own real link without dropping text or
+// changing the compact, multi-link Google Sheets layout.
+function xlsxItemColumns(table: Table): Table {
+  const links = validatedLinks(table.rows, table.links);
+  const lists = validatedItemLists(table.rows, table.itemLists, links);
+  if (!lists.length) return table;
+  const widths = new Map<number, number>();
+  const cells = new Map(
+    lists.map((list) => [`${list.row}:${list.column}`, list]),
+  );
+  for (const list of lists)
+    widths.set(
+      list.column,
+      Math.max(widths.get(list.column) ?? 1, list.items.length),
+    );
+  const columns = (table.rows[0] ?? []).map(
+    (_, c) =>
+      c +
+      [...widths].reduce(
+        (extra, [column, width]) => extra + (column < c ? width - 1 : 0),
+        0,
+      ),
+  );
+  const rows = table.rows.map((row, r) =>
+    row.flatMap((cell, c) => {
+      const width = widths.get(c) ?? 1;
+      const list = cells.get(`${r}:${c}`);
+      return Array.from({ length: width }, (_, i) =>
+        r === 0
+          ? width === 1
+            ? cell
+            : cell === "Materials per Craft"
+              ? `Material ${i + 1}`
+              : `${cell} ${i + 1}`
+          : list
+            ? (list.items[i]?.text ?? "")
+            : i === 0
+              ? cell
+              : "",
+      );
+    }),
+  );
+  return {
+    ...table,
+    rows,
+    itemLists: [],
+    links: [
+      ...links.map((link) => ({
+        ...link,
+        column: columns[link.column] ?? link.column,
+      })),
+      ...lists.flatMap((list) =>
+        list.items.map((item, i) => ({
+          row: list.row,
+          column: (columns[list.column] ?? list.column) + i,
+          url: item.url,
+        })),
+      ),
+    ],
+    ...(table.relativeDates
+      ? {
+          relativeDates: table.relativeDates.map((date) => ({
+            ...date,
+            column: columns[date.column] ?? date.column,
+          })),
+        }
+      : {}),
+  };
+}
+
 // XLSX and CSV are snapshots at Generated At. Excel has no portable viewer-UTC
 // clock, so only Sheets uses the live-relative formula. XLSX text stays literal.
 export function toXlsx(tables: Table[]): Uint8Array {
@@ -570,7 +671,8 @@ export function toXlsx(tables: Table[]): Uint8Array {
     "xl/styles.xml",
     `<styleSheet xmlns="${ns}"><fonts count="${3 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}<font><u/><color rgb="FF0563C1"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="${4 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${5 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}<xf numFmtId="0" fontId="0" fillId="${3 + classStyles.length}" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>${[0, 3 + classStyles.length].map((fill) => `<xf numFmtId="0" fontId="${2 + classStyles.length}" fillId="${fill}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
   );
-  tables.forEach((table, i) => {
+  tables.forEach((inputTable, i) => {
+    const table = xlsxItemColumns(inputTable);
     validatedRelativeDates(table);
     const links = validatedLinks(table.rows, table.links);
     const linkCells = new Set(

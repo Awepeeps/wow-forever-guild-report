@@ -3,7 +3,11 @@ import { z } from "zod";
 import { relativeLoginFormula, validatedRelativeDates } from "./dates.ts";
 import { readJson } from "./files.ts";
 import { HttpClient, SafeError } from "./http.ts";
-import { validatedLinks } from "./links.ts";
+import {
+  type ItemLinkList,
+  validatedItemLists,
+  validatedLinks,
+} from "./links.ts";
 import {
   classStyle,
   columnPresentation,
@@ -28,6 +32,7 @@ type SheetValue = z.infer<typeof valueSchema>;
 interface NoteCell {
   userEnteredValue?: SheetValue | undefined;
   userEnteredFormat?: Record<string, unknown> | undefined;
+  textFormatRuns?: Record<string, unknown>[] | undefined;
 }
 type NotesByTable = Partial<
   Record<"Characters" | "Professions", ReadonlyMap<string, NoteCell>>
@@ -86,6 +91,9 @@ const gridSchema = z.object({
                         userEnteredValue: valueSchema.optional(),
                         userEnteredFormat: z
                           .record(z.string(), z.unknown())
+                          .optional(),
+                        textFormatRuns: z
+                          .array(z.record(z.string(), z.unknown()))
                           .optional(),
                       }),
                     )
@@ -149,7 +157,12 @@ export function preservedNotes(
     const note = cell?.userEnteredValue;
     const hasContent =
       note && !("stringValue" in note && note.stringValue === "");
-    if (!hasContent && !cell?.userEnteredFormat) continue;
+    if (
+      !hasContent &&
+      !cell?.userEnteredFormat &&
+      !cell?.textFormatRuns?.length
+    )
+      continue;
     const id = textValue(row.values[idIndex]?.userEnteredValue);
     const key = `${textValue(row.values[regionIndex]?.userEnteredValue)}:${id ? `id:${id}` : textValue(row.values[slugIndex]?.userEnteredValue)}`;
     // Canonicalize a slug-only row to its current stable ID before checking
@@ -169,6 +182,7 @@ export function preservedNotes(
       ...(cell?.userEnteredFormat
         ? { userEnteredFormat: cell.userEnteredFormat }
         : {}),
+      ...(cell?.textFormatRuns ? { textFormatRuns: cell.textFormatRuns } : {}),
     });
   }
   return result;
@@ -235,6 +249,27 @@ export async function googleToken(
   return parsed.data.access_token;
 }
 
+function materialRuns(items: ItemLinkList["items"]): Record<string, unknown>[] {
+  const runs: Record<string, unknown>[] = [];
+  let offset = 0;
+  for (const [index, item] of items.entries()) {
+    runs.push({
+      startIndex: offset,
+      format: {
+        link: { uri: item.url },
+        foregroundColor: rgb("0563C1"),
+        underline: true,
+      },
+    });
+    offset += item.text.length; // Sheets offsets count UTF-16 code units.
+    if (index < items.length - 1) {
+      runs.push({ startIndex: offset, format: {} });
+      offset++;
+    }
+  }
+  return runs;
+}
+
 export function sheetRequests(
   tables: Table[],
   existing: { sheetId: number; title: string }[],
@@ -251,6 +286,7 @@ export function sheetRequests(
       ]),
     );
     const links = validatedLinks(table.rows, table.links);
+    const itemLists = validatedItemLists(table.rows, table.itemLists, links);
     const title = table.name;
     let id = existing.find((s) => s.title === title)?.sheetId;
     const rows = table.rows.length;
@@ -335,9 +371,14 @@ export function sheetRequests(
                   : typeof cell === "number"
                     ? { numberValue: cell }
                     : { stringValue: cell },
+            ...(r > 0 && c === noteColumn && noteFor(row)?.textFormatRuns
+              ? { textFormatRuns: noteFor(row)?.textFormatRuns }
+              : {}),
           })),
         })),
-        fields: "userEnteredValue",
+        // Writing values erases old rich text. Restore human runs while clearing
+        // generated runs explicitly, including materials that became unknown.
+        fields: "userEnteredValue,textFormatRuns",
       },
     });
     // Shared formatting is range-based so a large guild remains one bounded batch.
@@ -350,7 +391,7 @@ export function sheetRequests(
           ];
     if (rows > 1) {
       for (const [start, end] of bodyRanges)
-        if (start !== end)
+        if (start !== end) {
           requests.push({
             repeatCell: {
               range: {
@@ -371,6 +412,22 @@ export function sheetRequests(
               fields: "userEnteredFormat",
             },
           });
+          // A missing item must not keep a previous whole-cell target, even
+          // when this publish contains no links in that column at all.
+          requests.push({
+            repeatCell: {
+              range: {
+                sheetId: id,
+                startRowIndex: 1,
+                endRowIndex: rows,
+                startColumnIndex: start,
+                endColumnIndex: end,
+              },
+              cell: {},
+              fields: "userEnteredFormat.textFormat.link",
+            },
+          });
+        }
       if (title === "Professions")
         for (const group of playerGroups(table.rows).filter((g) => g.shaded))
           requests.push({
@@ -445,6 +502,28 @@ export function sheetRequests(
             })),
             fields:
               "userEnteredFormat.textFormat.link,userEnteredFormat.textFormat.foregroundColor,userEnteredFormat.textFormat.underline",
+          },
+        });
+      }
+      for (const column of new Set(itemLists.map((list) => list.column))) {
+        const cells = new Map(
+          itemLists
+            .filter((list) => list.column === column)
+            .map((list) => [list.row, list]),
+        );
+        requests.push({
+          updateCells: {
+            start: { sheetId: id, rowIndex: 1, columnIndex: column },
+            rows: table.rows.slice(1).map((_, i) => ({
+              values: [
+                {
+                  textFormatRuns: cells.has(i + 1)
+                    ? materialRuns(cells.get(i + 1)?.items ?? [])
+                    : [],
+                },
+              ],
+            })),
+            fields: "textFormatRuns",
           },
         });
       }
@@ -620,7 +699,7 @@ export async function publishSheets(
     const grid = gridSchema.safeParse(
       await http.json(
         "Google Sheets",
-        `${url}?ranges=${encodeURIComponent(`'${title}'`)}&includeGridData=true&fields=sheets(data(rowData(values(userEnteredValue,userEnteredFormat))))`,
+        `${url}?ranges=${encodeURIComponent(`'${title}'`)}&includeGridData=true&fields=sheets(data(rowData(values(userEnteredValue,userEnteredFormat,textFormatRuns))))`,
         { headers },
       ),
     );
