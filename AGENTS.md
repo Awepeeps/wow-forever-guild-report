@@ -10,7 +10,7 @@ The lead agent writes implementation code. Delegate research, analysis, and inde
 - `src/blizzard.ts`: the isolated Forever API adapter. No Retail paths or Armory HTML fallback.
 - `src/http.ts`: bounded retries/timeouts and safe errors. API response bodies, URLs with tokens, and credential values must not enter errors/logs.
 - `src/roster.ts`: guild discovery, independent enrichment, retained data, status, and sorting.
-- `src/workbook.ts`: pure table/CSV/OOXML renderers. Keep formulas out of XLSX/CSV. The user-requested view-relative Last Login in Google Sheets is the only generated-formula exception: a fixed DATE/TODAY template built from validated numeric date parts, never raw data or arbitrary expressions. Only deterministic HTTPS Armory/Wowhead public links requested by the user may be emitted; never accept arbitrary link targets from API/config data.
+- `src/workbook.ts`: pure table/CSV/OOXML renderers. Keep formulas out of XLSX/CSV. The user-requested view-relative Last Login in Google Sheets is the only generated-formula exception: a fixed DATE/TODAY template built from validated numeric date parts, never raw data or arbitrary expressions. Only deterministic HTTPS Armory/Wowhead public links and the exact upstream source repository link requested by the user may be emitted; never accept arbitrary link targets from API/config data.
 - `src/presentation.ts`: shared column widths/visibility and readable class colors for XLSX and Google Sheets.
 - `src/sheets.ts`: explicit Google writes, ownership checks, preservation of human Notes.
 - `src/files.ts`, `src/import.ts`, `src/cli.ts`: private I/O, migration, command orchestration.
