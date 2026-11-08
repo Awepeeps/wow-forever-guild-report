@@ -54,3 +54,9 @@ recipe-map build output=".local/recipe-map.json":
 
 sheets snapshot="output/roster/snapshot.json":
     bun run cli sheets --snapshot {{quote(snapshot)}}
+
+# Requires explicit authorization to update the configured Google spreadsheet.
+# Manual refresh/publish cycles should use this command while its timer is enabled.
+daily:
+    @mkdir -p -m 700 .local
+    flock --nonblock --conflict-exit-code 75 .local/daily-refresh.lock bun scripts/daily-refresh.ts
