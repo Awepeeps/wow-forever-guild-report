@@ -58,11 +58,17 @@ test("recipe lookup preserves distinct IDs, deduplicates tiers and sorts profess
   const tables = buildTables(input);
   const lookup = tables.find((t) => t.name === "Recipes");
   expect(lookup?.rows).toHaveLength(4);
-  expect(lookup?.rows[1]?.[2]).toContain(
+  expect(
+    lookup?.rows[1]?.[lookup.rows[0]?.indexOf("Known By") ?? -1],
+  ).toContain(
     "Guild Leader — Leader\nExample Priest — example_discord [retained; last success: 2026-11-06T12:00:00.000Z]",
   );
-  expect(lookup?.rows[1]?.[3]).toBe("Includes retained data");
-  expect(lookup?.rows[3]?.[3]).toBe("Current reports");
+  expect(lookup?.rows[1]?.[lookup.rows[0]?.indexOf("Knower Data") ?? -1]).toBe(
+    "Includes retained data",
+  );
+  expect(lookup?.rows[3]?.[lookup.rows[0]?.indexOf("Knower Data") ?? -1]).toBe(
+    "Current reports",
+  );
   expect(tables.find((t) => t.name === "Guild Info")?.rows).toContainEqual([
     "Recipe Coverage (current / characters)",
     "1 / 2",

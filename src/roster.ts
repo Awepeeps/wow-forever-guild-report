@@ -255,6 +255,7 @@ export async function refreshRoster(
     version: 1,
     region: config.region,
     guild: config.guild ?? null,
+    reportTimeZone: config.reportTimeZone,
     guildRankNames: config.guildRankNames,
     generatedAt: fetchedAt,
     rows,

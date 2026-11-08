@@ -1,3 +1,5 @@
+import type { RosterRow } from "./model.ts";
+
 const classColors: Record<string, string> = {
   warrior: "C79C6E",
   paladin: "F58CBA",
@@ -33,6 +35,34 @@ export function displayApiStatus(
 }
 
 export const playerNotesHeader = "Player Notes (Editable)";
+export function apiDetails(
+  row: RosterRow,
+  scope: "character" | "profession",
+): string {
+  const components =
+    scope === "character"
+      ? [
+          ["Profile", row.profileStatus],
+          ["Talents", row.talentStatus],
+        ]
+      : [["Professions", row.professionStatus]];
+  const details = components.flatMap(([name, status]) =>
+    status === "unavailable"
+      ? [`${name}: unavailable (404)`]
+      : status === "error"
+        ? [`${name}: request or response validation failed`]
+        : [],
+  );
+  if (
+    scope === "profession" &&
+    row.professionStatus === "ok" &&
+    [...row.character.primary, ...row.character.secondary].some(
+      (p) => p.recipesRetained,
+    )
+  )
+    details.push("Recipe list omitted; prior knowledge retained");
+  return details.join("; ");
+}
 export function exportHeader(
   table: string,
   header: string | number,
@@ -112,6 +142,11 @@ export function columnPresentation(
     "Armory URL",
     "Average ilvl",
     "Last Login (UTC)",
+    "Recipe Details Last Success",
+    "Recipe Details Last Attempt",
+    "Output Item ID",
+    "Output Minimum",
+    "Output Maximum",
   ]);
   const hidden =
     technical.has(header) ||
@@ -137,6 +172,10 @@ export function columnPresentation(
     Recipe: 240,
     "Known By": 460,
     "Knower Data": 160,
+    Makes: 230,
+    "Materials per Craft": 280,
+    "Recipe Details": 170,
+    "API Details": 260,
     Topic: 220,
     Details: 720,
     Metric: 300,

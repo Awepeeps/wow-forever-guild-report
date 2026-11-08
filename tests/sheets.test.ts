@@ -22,7 +22,14 @@ test("publishing creates only tool-owned tabs using explicit string values, neve
     return Response.json(
       String(input).includes(":batchUpdate")
         ? {}
-        : { sheets: [{ properties: { sheetId: 1, title: "Human Notes" } }] },
+        : {
+            sheets: [
+              { properties: { sheetId: 1, title: "Useful Info and Guides" } },
+              {
+                properties: { sheetId: 2, title: "Guide Suggestions (Manual)" },
+              },
+            ],
+          },
     );
   });
   await publishSheets(tables, "example-spreadsheet-id", "test-token", http);
@@ -32,6 +39,9 @@ test("publishing creates only tool-owned tabs using explicit string values, neve
   expect(body).not.toContain("formulaValue");
   expect(body).toContain("createDeveloperMetadata");
   expect(body).not.toContain('"sheetId":1,');
+  expect(body).not.toContain('"sheetId":2,');
+  expect(body).not.toContain('"title":"Guide Suggestions (Manual)"');
+  expect(body).not.toContain('"title":"Useful Info and Guides"');
   expect(body).toContain('"title":"Characters"');
 });
 

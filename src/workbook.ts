@@ -1,5 +1,10 @@
 import { strToU8, zipSync } from "fflate";
 import {
+  craftingMaterials,
+  craftingOutput,
+  recipeDetailStatus,
+} from "./crafting.ts";
+import {
   type RelativeDate,
   relativeLogin,
   validatedRelativeDates,
@@ -8,6 +13,7 @@ import {
   armoryUrl,
   type PublicLink,
   recipeUrl,
+  upstreamIssuesUrl,
   upstreamRepositoryUrl,
   validatedLinks,
 } from "./links.ts";
@@ -18,6 +24,7 @@ import {
   sortRows,
 } from "./model.ts";
 import {
+  apiDetails,
   classStyle,
   columnPresentation,
   displayApiStatus,
@@ -49,6 +56,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Last Login",
       "Character API Status",
       playerNotesHeader,
+      "API Details",
       "Average ilvl",
       "Last Login (UTC)",
       "Generated At",
@@ -79,6 +87,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Secondary Professions",
       "Profession API Status",
       playerNotesHeader,
+      "API Details",
       "Generated At",
       "Professions Last Success",
       "Recipe Coverage",
@@ -127,6 +136,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
         characterRetained,
       ),
       "",
+      apiDetails(row, "character"),
       c.averageItemLevel ?? "",
       c.lastLoginAt ?? "",
       snapshot.generatedAt,
@@ -176,6 +186,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
             (c.primary.length > 0 || c.secondary.length > 0)),
       ),
       "",
+      apiDetails(row, "profession"),
       snapshot.generatedAt,
       row.professionFetchedAt ?? "",
       recipeCoverage(row),
@@ -190,17 +201,26 @@ export function buildTables(snapshot: Snapshot): Table[] {
     [
       "Profession",
       "Recipe",
+      "Makes",
+      "Materials per Craft",
       "Known By",
+      "Recipe Details",
       "Knower Data",
       "Recipe ID",
       "Generated At",
       "Wowhead Link",
       "Wowhead Spell ID",
+      "Recipe Details Last Success",
+      "Recipe Details Last Attempt",
+      "Output Item ID",
+      "Output Minimum",
+      "Output Maximum",
       "Recipe URL",
     ],
   ];
   for (const recipe of recipeEntries) {
     const spellId = snapshot.recipeMapping?.spells[String(recipe.id)];
+    const details = snapshot.recipeDetails?.[String(recipe.id)];
     const status = recipe.knowers.some((r) => r.status === "retained")
       ? "Includes retained data"
       : recipe.knowers.some((r) => r.status === "manual")
@@ -210,12 +230,20 @@ export function buildTables(snapshot: Snapshot): Table[] {
       recipes.push([
         recipe.profession,
         recipe.name,
+        craftingOutput(details?.data),
+        craftingMaterials(details?.data),
         chunk,
+        recipeDetailStatus(details),
         status,
         recipe.id,
         snapshot.generatedAt,
         spellId === undefined ? "Unmapped — update recipe map" : "Exact spell",
         spellId ?? "",
+        details?.fetchedAt ?? "",
+        details?.attemptedAt ?? "",
+        details?.data?.output?.id ?? "",
+        details?.data?.quantity?.min ?? "",
+        details?.data?.quantity?.max ?? "",
         spellId === undefined ? "" : recipeUrl(spellId),
       ]);
   }
@@ -224,9 +252,50 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ["Guild", snapshot.guild ?? "Explicit character roster"],
     ["Region", snapshot.region],
     ["Generated At", snapshot.generatedAt],
+    [
+      "Last Refresh (local)",
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: snapshot.reportTimeZone,
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
+      }).format(new Date(snapshot.generatedAt)),
+    ],
+    ["Report Timezone", snapshot.reportTimeZone],
     ["Characters", snapshot.rows.length],
+    [
+      "Character API Coverage (complete / characters)",
+      `${characters.slice(1).filter((row) => row[characters[0]?.indexOf("Character API Status") ?? -1] === "Complete").length} / ${snapshot.rows.length}`,
+    ],
+    [
+      "Profession API Coverage (complete / characters)",
+      `${professions.slice(1).filter((row) => row[professions[0]?.indexOf("Profession API Status") ?? -1] === "Complete").length} / ${snapshot.rows.length}`,
+    ],
+    [
+      "Recipe Coverage (current / characters)",
+      `${snapshot.rows.filter((r) => recipeCoverage(r) === "Current").length} / ${snapshot.rows.length}`,
+    ],
     ["Discord Mapped", snapshot.rows.filter((r) => r.discord).length],
     ["Known Recipes (distinct profession + ID)", recipeEntries.length],
+    [
+      "Recipe Detail Responses (successful / recipes)",
+      `${recipeEntries.filter((r) => snapshot.recipeDetails?.[String(r.id)]?.status === "ok").length} / ${recipeEntries.length}`,
+    ],
+    [
+      "Recipe Details (complete / recipes)",
+      `${recipeEntries.filter((r) => recipeDetailStatus(snapshot.recipeDetails?.[String(r.id)]) === "Available").length} / ${recipeEntries.length}`,
+    ],
+    [
+      "Recipe Details Source",
+      `Blizzard static-forever-${snapshot.region} recipe API`,
+    ],
+    [
+      "Auction Prices",
+      "Disabled — the guild's Roleplay auction house has not been verified. No prices from other markets are substituted.",
+    ],
     [
       "Wowhead Exact Recipe Links",
       recipeEntries.filter(
@@ -240,10 +309,6 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     ["Recipe Mapping SHA-256", snapshot.recipeMapping?.sha256 ?? ""],
     ["Recipe Mapping Fetched At", snapshot.recipeMapping?.fetchedAt ?? ""],
-    [
-      "Recipe Coverage (current / characters)",
-      `${snapshot.rows.filter((r) => recipeCoverage(r) === "Current").length} / ${snapshot.rows.length}`,
-    ],
     [
       "Recipe Coverage",
       "Only API-returned knowledge is listed; missing or retained data is not proof that nobody knows a recipe. See Professions' hidden Recipe Coverage column.",
@@ -275,6 +340,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
   const reference: Cell[][] = [
     ["Topic", "Details"],
     ["Source code (upstream)", upstreamRepositoryUrl],
+    ["Report a problem", upstreamIssuesUrl],
+    [
+      "Refreshing this workbook",
+      "Run just refresh with the private guild config and output directory to refresh local exports; exit 2 means partial data was retained. Publishing to Google Sheets is a separate, explicitly requested just sheets step. Check Guild Info for last refresh and API coverage. Do not attach private rosters, notes, credentials or exports to a public issue.",
+    ],
     [
       "Layout",
       "Characters is the roster overview; Professions has one row per character with primary/secondary skills and tiers in separate cells. Both sort by numeric guild rank, Discord, then character name. Shading marks contiguous player groups; rank-first order can split one player's characters across ranks. Guild Info shows the export timestamp. Technical identity, status, generation and last-success columns are hidden by default and can be unhidden. CSV files include all columns.",
@@ -285,7 +355,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "API status",
-      "Character API Status covers profile/talents; Profession API Status covers professions/recipes. Both use Complete, Unavailable, Incomplete, Manual. Complete means all relevant requests succeeded. Unavailable means 404s with no retained detail; Incomplete means mixed/error responses or retained data, which may be older than this export. Unhide component statuses and last-success columns for details.",
+      "Character API Status covers profile/talents; Profession API Status covers professions/recipes. Both use Complete, Unavailable, Incomplete, Manual. Complete means all relevant requests succeeded. Unavailable means 404s with no retained detail; Incomplete means mixed/error responses or retained data, which may be older than this export. API Details explains failed components without changing the status vocabulary. Unhide component statuses and last-success columns for timestamps.",
     ],
     [
       "Identity",
@@ -329,8 +399,16 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Recipes lists profession, recipe and known characters (with Discord), sorted by profession then recipe. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests retain known recipes with per-character last-success labels. Successful responses omitting recipe lists retain only the same profession/tier knowledge and its original recipe-specific timestamp; explicit empty lists clear it. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
     ],
     [
+      "Recipe materials and output",
+      "Makes and Materials per Craft come from Blizzard's static-forever recipe-detail endpoint, using the original recipe ID. All returned materials and quantities are preserved; ? and Unknown mean unreported, never zero. Details are cached privately for 24 hours and refreshed after a mapping-build change. Failed requests retain prior details and their original last-success time, with a visible Retained label; missing fields on successful responses become unknown. Recipe Details reports metadata availability independently of who knows it. Unhide last-success, last-attempt and output IDs/quantities for diagnostics. No vendor substitutions or Classic/Retail fallbacks are used.",
+    ],
+    [
+      "Auction prices",
+      "Price estimates are disabled until the guild's exact auction house is verified. The Forever API lists multiple identically named houses and does not reliably identify their ruleset. Materials/output remain useful without prices; unknown prices are not treated as zero.",
+    ],
+    [
       "Public links",
-      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open exact Wowhead Forever crafting spell pages using a build-pinned SkillLineAbility.ID → Spell table from wago.tools. Blizzard recipe IDs are never treated as spell IDs or matched by name. Unmapped recipes have no link and are labelled for a mapping update; no search links are substituted. Guild Info records the mapping build, source hash and fetch time. Hidden spell-ID/URL columns keep targets in CSV. Source code (upstream) links to the public GitHub repository that generates this export. Hyperlinks are restricted to the approved HTTPS Armory/Wowhead routes and that exact repository; arbitrary API URLs are never emitted. Only Sheets Last Login uses the fixed generated relative-date formula; raw data stays literal.",
+      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open exact Wowhead Forever crafting spell pages using a build-pinned SkillLineAbility.ID → Spell table from wago.tools. Blizzard recipe IDs are never treated as spell IDs or matched by name. Unmapped recipes have no link and are labelled for a mapping update; no search links are substituted. Guild Info records the mapping build, source hash and fetch time. Hidden spell-ID/URL columns keep targets in CSV. Source code (upstream) links to the public GitHub repository that generates this export; Report a problem opens its issues page. Hyperlinks are restricted to the approved HTTPS Armory/Wowhead routes and those exact repository/issues links; arbitrary API URLs are never emitted. Only Sheets Last Login uses the fixed generated relative-date formula; raw data stays literal.",
     ],
     [
       "Forever API research (community; US routes verified 2026-11-07)",
@@ -379,7 +457,10 @@ export function buildTables(snapshot: Snapshot): Table[] {
     {
       name: "Automated Export Info",
       rows: reference,
-      links: [{ row: 1, column: 1, url: upstreamRepositoryUrl }],
+      links: [
+        { row: 1, column: 1, url: upstreamRepositoryUrl },
+        { row: 2, column: 1, url: upstreamIssuesUrl },
+      ],
     },
   ];
 }
@@ -513,7 +594,7 @@ export function toXlsx(tables: Table[]): Uint8Array {
     const rows = table.rows
       .map(
         (row, r) =>
-          `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : ["Professions", "Recipes"].includes(table.name) ? ` ht="${professionRowHeight(table, row)}" customHeight="1"` : ""}>${row
+          `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : ["Characters", "Professions", "Recipes"].includes(table.name) ? ` ht="${professionRowHeight(table, row)}" customHeight="1"` : ""}>${row
             .map((cell, c) => {
               const output = r === 0 ? exportHeader(table.name, cell) : cell;
               const colorIndex =

@@ -108,6 +108,17 @@ const characterOverrideSchema = characterSchema.extend({
   secondary: characterSchema.shape.secondary.removeDefault().optional(),
 });
 export const regionSchema = z.enum(["us", "eu", "kr", "tw"]);
+export const reportTimeZoneSchema = z
+  .string()
+  .max(100)
+  .refine((value) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Invalid report timezone");
 const guildRankNamesSchema = z
   .record(z.string().regex(/^(?:0|[1-9]\d{0,2})$/), name)
   .default({});
@@ -132,6 +143,7 @@ export const configSchema = z
       ])
       .default("en_US"),
     guild: slugSchema.optional(),
+    reportTimeZone: reportTimeZoneSchema.default("UTC"),
     guildRankNames: guildRankNamesSchema,
     characters: z.array(characterOverrideSchema).max(2_000).default([]),
   })
@@ -176,14 +188,74 @@ export const recipeMappingSchema = z
   })
   .strict();
 export type RecipeMapping = z.infer<typeof recipeMappingSchema>;
+const recipeItemSchema = z
+  .object({
+    id: z.number().int().positive().max(2_147_483_647),
+    name: z.string().trim().min(1).max(200),
+  })
+  .strict();
+export const recipeDetailsSchema = z
+  .object({
+    id: recipeItemSchema.shape.id,
+    name: recipeItemSchema.shape.name,
+    output: recipeItemSchema.optional(),
+    quantity: z
+      .object({
+        min: z.number().int().positive().max(1_000_000),
+        max: z.number().int().positive().max(1_000_000),
+      })
+      .strict()
+      .refine((q) => q.min <= q.max)
+      .optional(),
+    // Omitted is unknown; [] is explicitly no reagents reported.
+    reagents: z
+      .array(
+        z
+          .object({
+            item: recipeItemSchema,
+            quantity: z.number().int().positive().max(1_000_000),
+          })
+          .strict(),
+      )
+      .max(100)
+      .optional(),
+  })
+  .strict();
+export type RecipeDetails = z.infer<typeof recipeDetailsSchema>;
+const recipeDetailEntrySchema = z
+  .object({
+    status: z.enum(["ok", "unavailable", "error"]),
+    attemptedAt: z.iso.datetime(),
+    fetchedAt: z.iso.datetime().nullable(),
+    build: foreverBuildSchema.optional(),
+    data: recipeDetailsSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (entry) =>
+      entry.status !== "ok" ||
+      (entry.data !== undefined && entry.fetchedAt !== null),
+  );
+export type RecipeDetailEntry = z.infer<typeof recipeDetailEntrySchema>;
+const recipeDetailsIndexSchema = z
+  .record(z.string().regex(/^[1-9]\d{0,9}$/), recipeDetailEntrySchema)
+  .refine(
+    (entries) =>
+      Object.keys(entries).length <= 20_000 &&
+      Object.entries(entries).every(
+        ([id, entry]) => !entry.data || String(entry.data.id) === id,
+      ),
+  );
 export const snapshotSchema = z
   .object({
     version: z.literal(1),
     region: regionSchema,
     generatedAt: z.iso.datetime(),
     guild: z.string().nullable(),
+    reportTimeZone: reportTimeZoneSchema.default("UTC"),
     guildRankNames: guildRankNamesSchema,
     recipeMapping: recipeMappingSchema.optional(),
+    recipeDetails: recipeDetailsIndexSchema.optional(),
     rows: z.array(rowSchema).max(2_000),
   })
   .strict()
@@ -248,6 +320,7 @@ export function manualSnapshot(
     region: config.region,
     generatedAt: now.toISOString(),
     guild: config.guild ?? null,
+    reportTimeZone: config.reportTimeZone,
     guildRankNames: config.guildRankNames,
     rows: sortRows(
       config.characters.map((entry) => ({
