@@ -28,7 +28,7 @@ test("public links use encoded Forever slugs and validated Wowhead spell IDs", (
     "javascript:alert(1)",
     "https://github.com/deathpie/wow-forever-guild-report",
     `${upstreamRepositoryUrl}?token=private`,
-    `${upstreamRepositoryUrl}/issues`,
+    `${upstreamRepositoryUrl}/issues/new`,
     "https://www.wowhead.com/forever/search?q=a&q=b",
     "file:///etc/passwd",
     "http://www.wowhead.com/forever/search?q=Example",

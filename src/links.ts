@@ -3,6 +3,7 @@ import { regionSchema, slugSchema, spellIdSchema } from "./model.ts";
 
 export const upstreamRepositoryUrl =
   "https://github.com/Awepeeps/wow-forever-guild-report";
+export const upstreamIssuesUrl = `${upstreamRepositoryUrl}/issues`;
 
 export function armoryUrl(region: string, slug: string): string {
   return `https://worldofwarcraft.blizzard.com/en-us/forever/${regionSchema.parse(region)}/armory/character/${encodeURIComponent(slugSchema.parse(slug))}`;
@@ -24,7 +25,7 @@ export function assertPublicLink(value: string): void {
       url.hash
     )
       throw new Error();
-    if (value === upstreamRepositoryUrl) return;
+    if (value === upstreamRepositoryUrl || value === upstreamIssuesUrl) return;
     if (url.hostname === "worldofwarcraft.blizzard.com" && !url.search) {
       const parts = url.pathname.split("/");
       if (

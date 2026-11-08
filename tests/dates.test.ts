@@ -421,9 +421,10 @@ test("the full previous Characters layout preserves the old note and format befo
   expect(values?.[10]?.userEnteredValue?.stringValue).toBe(
     "Keep this player note",
   );
-  expect(values?.[12]?.userEnteredValue?.stringValue).toBe(
-    "2026-11-07T01:30:00.000Z",
-  );
+  expect(
+    values?.[table.rows[0]?.indexOf("Last Login (UTC)") ?? -1]?.userEnteredValue
+      ?.stringValue,
+  ).toBe("2026-11-07T01:30:00.000Z");
   expect(
     requests.find((r) => r.updateCells?.start?.columnIndex === 10)?.updateCells
       ?.rows[0]?.values[0]?.userEnteredFormat,

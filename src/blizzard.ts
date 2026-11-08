@@ -4,7 +4,9 @@ import {
   type Character,
   characterSchema,
   type Profession,
+  type RecipeDetails,
   type RosterConfig,
+  recipeDetailsSchema,
   recipeSchema,
   slugSchema,
 } from "./model.ts";
@@ -79,6 +81,28 @@ const classIndexSchema = z.object({
 const tokenSchema = z.object({
   access_token: z.string().min(1),
   expires_in: z.number().positive(),
+});
+const positiveQuantity = z.number().int().positive().max(1_000_000);
+const recipeItem = z.object({
+  id: z.number().int().positive().max(2_147_483_647),
+  name: z.string().trim().min(1).max(200),
+});
+const recipeDetailSchema = z.object({
+  id: recipeItem.shape.id,
+  name: recipeItem.shape.name,
+  crafted_item: recipeItem.optional(),
+  crafted_quantity: z
+    .union([
+      z.object({ value: positiveQuantity }),
+      z
+        .object({ minimum: positiveQuantity, maximum: positiveQuantity })
+        .refine((q) => q.minimum <= q.maximum),
+    ])
+    .optional(),
+  reagents: z
+    .array(z.object({ reagent: recipeItem, quantity: positiveQuantity }))
+    .max(100)
+    .optional(),
 });
 const talentsSchema = z.object({
   specialization_groups: z
@@ -269,6 +293,45 @@ export class BlizzardClient {
         ? new Date(p.last_login_timestamp).toISOString()
         : undefined,
     };
+  }
+
+  async recipe(id: number): Promise<RecipeDetails> {
+    const recipeId = parseApi(recipeItem.shape.id, id, "recipe ID");
+    const data = parseApi(
+      recipeDetailSchema,
+      await this.get(`/data/wow/recipe/${recipeId}`, "static"),
+      "recipe details",
+    );
+    if (data.id !== recipeId)
+      throw new SafeError(
+        "Blizzard recipe identity did not match the request.",
+      );
+    const quantity = data.crafted_quantity;
+    return parseApi(
+      recipeDetailsSchema,
+      {
+        id: data.id,
+        name: data.name,
+        ...(data.crafted_item ? { output: data.crafted_item } : {}),
+        ...(quantity
+          ? {
+              quantity:
+                "value" in quantity
+                  ? { min: quantity.value, max: quantity.value }
+                  : { min: quantity.minimum, max: quantity.maximum },
+            }
+          : {}),
+        ...(data.reagents === undefined
+          ? {}
+          : {
+              reagents: data.reagents.map((r) => ({
+                item: r.reagent,
+                quantity: r.quantity,
+              })),
+            }),
+      },
+      "normalized recipe details",
+    );
   }
 
   async professions(

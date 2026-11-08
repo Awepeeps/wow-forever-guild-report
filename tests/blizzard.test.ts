@@ -356,3 +356,65 @@ test("guild class references resolve through the Forever class index even when c
     expect(urls.some((u) => u.includes("untrusted.invalid"))).toBe(false);
   }
 });
+
+test("recipe details use original IDs on the static Forever route, validate quantities and strip external references", async () => {
+  let response: unknown = {
+    id: 42,
+    name: "Invented Tonic",
+    crafted_item: {
+      id: 7001,
+      name: "Invented Tonic",
+      key: { href: "https://untrusted.invalid/never-follow" },
+    },
+    crafted_quantity: { minimum: 1, maximum: 3 },
+    reagents: [{ reagent: { id: 7002, name: "Invented Herb" }, quantity: 2 }],
+  };
+  const urls: string[] = [];
+  const client = new BlizzardClient(
+    { region: "us", locale: "en_US" },
+    { clientId: "test", clientSecret: "test" },
+    new HttpClient(async (input) => {
+      const url = new URL(input);
+      urls.push(url.toString());
+      if (url.pathname.endsWith("/token"))
+        return Response.json({ access_token: "test-token", expires_in: 3600 });
+      expect(url.pathname).toBe("/data/wow/recipe/42");
+      expect(url.searchParams.get("namespace")).toBe("static-forever-us");
+      return Response.json(response);
+    }),
+  );
+  expect(await client.recipe(42)).toEqual({
+    id: 42,
+    name: "Invented Tonic",
+    output: { id: 7001, name: "Invented Tonic" },
+    quantity: { min: 1, max: 3 },
+    reagents: [{ item: { id: 7002, name: "Invented Herb" }, quantity: 2 }],
+  });
+  response = {
+    id: 42,
+    name: "Invented Tonic",
+    crafted_quantity: { value: 1 },
+    reagents: [],
+  };
+  expect((await client.recipe(42)).quantity).toEqual({ min: 1, max: 1 });
+  response = { id: 42, name: "Invented Tonic" };
+  expect((await client.recipe(42)).reagents).toBeUndefined();
+  response = { id: 43, name: "Different Recipe" };
+  await expect(client.recipe(42)).rejects.toThrow("identity");
+  response = {
+    id: 42,
+    name: "Invented Tonic",
+    reagents: [{ reagent: { id: 7002, name: "Invented Herb" }, quantity: -1 }],
+  };
+  await expect(client.recipe(42)).rejects.toThrow("unsupported shape");
+  response = {
+    id: 42,
+    name: "Invented Tonic",
+    crafted_quantity: { minimum: 4, maximum: 1 },
+  };
+  await expect(client.recipe(42)).rejects.toThrow("unsupported shape");
+  const count = urls.length;
+  await expect(client.recipe(-1)).rejects.toThrow("unsupported shape");
+  expect(urls).toHaveLength(count);
+  expect(urls.some((url) => url.includes("untrusted.invalid"))).toBe(false);
+});

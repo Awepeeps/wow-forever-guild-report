@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { BlizzardClient } from "./blizzard.ts";
+import { refreshRecipeDetails } from "./crafting.ts";
 import { atomicWrite, readJson, writeExports } from "./files.ts";
 import { ApiError, SafeError } from "./http.ts";
 import { importCsv } from "./import.ts";
@@ -184,13 +185,10 @@ async function main(): Promise<void> {
       throw new SafeError(
         "Refresh requires BLIZZARD_CLIENT_ID and BLIZZARD_CLIENT_SECRET in Varlock configuration.",
       );
-    snapshot = await refreshRoster(
-      config,
-      map,
-      new BlizzardClient(config, { clientId, clientSecret }),
-      new Date(),
-      previous,
-    );
+    const client = new BlizzardClient(config, { clientId, clientSecret });
+    snapshot = await refreshRoster(config, map, client, new Date(), previous);
+    if (recipeMapping) snapshot = withRecipeMapping(snapshot, recipeMapping);
+    snapshot = await refreshRecipeDetails(snapshot, client, previous);
   }
   if (recipeMapping) snapshot = withRecipeMapping(snapshot, recipeMapping);
   await writeExports(snapshot, outputDirectory);
@@ -201,10 +199,15 @@ async function main(): Promise<void> {
         (s) => s === "unavailable" || s === "error",
       ),
   ).length;
+  const metadataEntries = Object.values(snapshot.recipeDetails ?? {});
+  const metadataFailures = metadataEntries.filter(
+    (entry) => entry.status !== "ok",
+  ).length;
   console.log(
-    `Exported ${snapshot.rows.length} characters; ${incomplete} with incomplete API data. CSV, roster.xlsx, snapshot.json written.`,
+    `Exported ${snapshot.rows.length} characters; ${incomplete} with incomplete API data. Recipe details: ${metadataEntries.length - metadataFailures} successful responses, ${metadataFailures} unavailable or retained. CSV, roster.xlsx, snapshot.json written.`,
   );
-  if (command === "refresh" && incomplete) process.exitCode = 2;
+  if (command === "refresh" && (incomplete || metadataFailures))
+    process.exitCode = 2;
 }
 
 try {

@@ -54,10 +54,13 @@ test("omitted recipe lists retain the same tier's knowledge with its own timesta
   const tables = buildTables(current);
   expect(tables[1]?.rows[1]).toContain("Incomplete");
   expect(tables[0]?.rows[1]).toContain("Complete");
-  expect(tables[2]?.rows[1]?.[2]).toContain(
-    `[retained; last success: ${now.toISOString()}]`,
-  );
-  expect(tables[2]?.rows[1]?.[3]).toBe("Includes retained data");
+  const recipes = tables[2];
+  expect(
+    recipes?.rows[1]?.[recipes.rows[0]?.indexOf("Known By") ?? -1],
+  ).toContain(`[retained; last success: ${now.toISOString()}]`);
+  expect(
+    recipes?.rows[1]?.[recipes.rows[0]?.indexOf("Knower Data") ?? -1],
+  ).toBe("Includes retained data");
   for (const primary of [
     [{ name: "Alchemy", tier: "First", skill: 51, max: 75, recipes: [] }],
     [{ name: "Alchemy", tier: "Second", skill: 51, max: 75 }],
@@ -89,7 +92,10 @@ test("omitted recipe lists retain the same tier's knowledge with its own timesta
   expect(failed.rows[0]?.character.primary[0]?.recipesFetchedAt).toBe(
     now.toISOString(),
   );
-  expect(buildTables(failed)[2]?.rows[1]?.[2]).toContain(now.toISOString());
+  const failedRecipes = buildTables(failed)[2];
+  expect(
+    failedRecipes?.rows[1]?.[failedRecipes.rows[0]?.indexOf("Known By") ?? -1],
+  ).toContain(now.toISOString());
 });
 
 test("failed components retain metrics/recipes and their success times, while successful omitted metrics become unknown", async () => {

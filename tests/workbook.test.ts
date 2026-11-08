@@ -19,6 +19,49 @@ test("imports original CSV without Notes or planned specs, skipping empty lines 
   );
 });
 
+test("API explanations identify failed components without changing the shared enum, and Guild Info uses the configured local time", () => {
+  const row = snapshot.rows[0];
+  if (!row) throw new Error("fixture");
+  const tables = buildTables({
+    ...snapshot,
+    reportTimeZone: "America/New_York",
+    generatedAt: "2026-11-08T02:30:00.000Z",
+    rows: [
+      {
+        ...row,
+        profileStatus: "unavailable",
+        talentStatus: "error",
+        professionStatus: "ok",
+        character: {
+          ...row.character,
+          primary: [{ name: "Alchemy", recipes: [], recipesRetained: true }],
+        },
+      },
+    ],
+  });
+  const chars = tables[0],
+    profs = tables[1];
+  if (!chars || !profs) throw new Error("fixture");
+  const value = (table: typeof chars, header: string) =>
+    table.rows[1]?.[table.rows[0]?.indexOf(header) ?? -1];
+  expect(value(chars, "Character API Status")).toBe("Incomplete");
+  expect(value(chars, "API Details")).toContain("Profile: unavailable (404)");
+  expect(value(chars, "API Details")).toContain(
+    "Talents: request or response validation failed",
+  );
+  expect(value(profs, "Profession API Status")).toBe("Incomplete");
+  expect(value(profs, "API Details")).toContain("prior knowledge retained");
+  expect(value(chars, "Player Notes (Editable)")).toBe("");
+  const guild = tables.find((t) => t.name === "Guild Info");
+  const local = guild?.rows.find((r) => r[0] === "Last Refresh (local)")?.[1];
+  expect(local).toContain("Nov 7, 2026");
+  expect(local).toContain("9:30 PM");
+  expect(guild?.rows).toContainEqual([
+    "Generated At",
+    "2026-11-08T02:30:00.000Z",
+  ]);
+});
+
 test("CSV strings cannot become formulas and quoted multiline data round trips", () => {
   const csv = toCsv([
     [
@@ -99,7 +142,7 @@ test("compact roster keeps skills in Professions and hides technical columns wit
   const characters = tables[0];
   const professions = tables[1];
   if (!characters || !professions) throw new Error("fixture");
-  expect(characters.rows[0]?.slice(0, 14)).toEqual([
+  expect(characters.rows[0]?.slice(0, 15)).toEqual([
     "Discord",
     "Character Name",
     "Guild Rank",
@@ -111,6 +154,7 @@ test("compact roster keeps skills in Professions and hides technical columns wit
     "Last Login",
     "Character API Status",
     "Player Notes (Editable)",
+    "API Details",
     "Average ilvl",
     "Last Login (UTC)",
     "Generated At",
@@ -145,7 +189,7 @@ test("compact roster keeps skills in Professions and hides technical columns wit
   const styles = strFromU8(files["xl/styles.xml"] ?? new Uint8Array());
   expect(sheet).toContain('topLeftCell="C2"');
   expect(sheet).toContain(
-    'min="15" max="15" width="25.71" customWidth="1" hidden="1"',
+    'min="16" max="16" width="25.71" customWidth="1" hidden="1"',
   );
   expect(sheet).toContain('r="D2" s="2"');
   expect(styles).toContain('rgb="FF0070DE"');
