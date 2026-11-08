@@ -122,6 +122,17 @@ export const reportTimeZoneSchema = z
 const guildRankNamesSchema = z
   .record(z.string().regex(/^(?:0|[1-9]\d{0,2})$/), name)
   .default({});
+export const auctionMarketSchema = z
+  .object({
+    rulesetId: z.number().int().positive().max(999),
+    rulesetName: name,
+    faction: z.enum(["Alliance", "Horde", "Blackwater"]),
+    houseId: z.number().int().positive().max(1_000_000),
+    verifiedAt: z.iso.datetime(),
+    verification: z.literal("in-game-listings"),
+  })
+  .strict();
+export type AuctionMarket = z.infer<typeof auctionMarketSchema>;
 export const configSchema = z
   .object({
     version: z.literal(1),
@@ -145,6 +156,7 @@ export const configSchema = z
     guild: slugSchema.optional(),
     reportTimeZone: reportTimeZoneSchema.default("UTC"),
     guildRankNames: guildRankNamesSchema,
+    auctionMarket: auctionMarketSchema.optional(),
     characters: z.array(characterOverrideSchema).max(2_000).default([]),
   })
   .strict()
@@ -247,6 +259,38 @@ const recipeDetailsIndexSchema = z
         ([id, entry]) => !entry.data || String(entry.data.id) === id,
       ),
   );
+export const auctionBookSchema = z
+  .object({
+    auctionsUpdatedAt: z.iso.datetime().nullable(),
+    commoditiesUpdatedAt: z.iso.datetime().nullable(),
+    items: z
+      .record(
+        z.string().regex(/^[1-9]\d{0,9}$/),
+        z
+          .object({
+            unitCopper: z.number().positive().max(Number.MAX_SAFE_INTEGER),
+            quantity: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+          })
+          .strict(),
+      )
+      .refine((items) => Object.keys(items).length <= 50_000),
+  })
+  .strict();
+export type AuctionBook = z.infer<typeof auctionBookSchema>;
+const auctionPricesSchema = z
+  .object({
+    market: auctionMarketSchema,
+    status: z.enum(["ok", "unavailable", "error"]),
+    attemptedAt: z.iso.datetime(),
+    fetchedAt: z.iso.datetime().nullable(),
+    data: auctionBookSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (entry) =>
+      entry.status !== "ok" ||
+      (entry.data !== undefined && entry.fetchedAt !== null),
+  );
 export const snapshotSchema = z
   .object({
     version: z.literal(1),
@@ -257,10 +301,22 @@ export const snapshotSchema = z
     guildRankNames: guildRankNamesSchema,
     recipeMapping: recipeMappingSchema.optional(),
     recipeDetails: recipeDetailsIndexSchema.optional(),
+    auctionMarket: auctionMarketSchema.optional(),
+    auctionPrices: auctionPricesSchema.optional(),
     rows: z.array(rowSchema).max(2_000),
   })
   .strict()
   .superRefine((snapshot, ctx) => {
+    if (
+      snapshot.auctionPrices &&
+      JSON.stringify(snapshot.auctionPrices.market) !==
+        JSON.stringify(snapshot.auctionMarket)
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["auctionPrices"],
+        message: "Auction prices belong to a different market",
+      });
     for (const i of duplicateCharacterIndices(
       snapshot.rows.map((row) => row.character),
     ))
@@ -323,6 +379,7 @@ export function manualSnapshot(
     guild: config.guild ?? null,
     reportTimeZone: config.reportTimeZone,
     guildRankNames: config.guildRankNames,
+    ...(config.auctionMarket ? { auctionMarket: config.auctionMarket } : {}),
     rows: sortRows(
       config.characters.map((entry) => ({
         character: characterSchema.parse(entry),

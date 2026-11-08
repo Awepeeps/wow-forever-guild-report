@@ -149,6 +149,14 @@ export function columnPresentation(
     "Output Maximum",
     "Makes URL",
     "Materials URLs",
+    "Output AH Copper",
+    "Materials AH Copper",
+    "Output AH Quantity",
+    "Auction House ID",
+    "Auction Last Success",
+    "Auction Last Attempt",
+    "Auctions Updated (UTC)",
+    "Commodities Updated (UTC)",
   ]);
   const hidden =
     technical.has(header) ||
@@ -177,6 +185,10 @@ export function columnPresentation(
     Makes: 230,
     "Materials per Craft": 280,
     "Recipe Details": 170,
+    "Output AH / Item": 180,
+    "Materials AH / Craft": 180,
+    "AH Data": 200,
+    "AH Snapshot (UTC)": 185,
     "API Details": 260,
     Topic: 220,
     Details: 720,

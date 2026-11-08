@@ -26,6 +26,15 @@ export class HttpClient {
     init: RequestInit = {},
     retry = true,
   ): Promise<unknown> {
+    return (await this.jsonWithMetadata(service, url, init, retry)).data;
+  }
+
+  async jsonWithMetadata(
+    service: string,
+    url: string | URL,
+    init: RequestInit = {},
+    retry = true,
+  ): Promise<{ data: unknown; lastModified: string | null }> {
     for (let attempt = 0; attempt < 4; attempt++) {
       let response: Response;
       try {
@@ -44,7 +53,10 @@ export class HttpClient {
       }
       if (response.ok) {
         try {
-          return await response.json();
+          return {
+            data: await response.json(),
+            lastModified: response.headers.get("last-modified"),
+          };
         } catch {
           throw new SafeError(`${service} returned invalid JSON.`);
         }

@@ -2,6 +2,7 @@ import "varlock/auto-load";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
+import { refreshAuctionPrices } from "./auctions.ts";
 import { BlizzardClient } from "./blizzard.ts";
 import { refreshRecipeDetails } from "./crafting.ts";
 import { atomicWrite, readJson, writeExports } from "./files.ts";
@@ -189,6 +190,7 @@ async function main(): Promise<void> {
     snapshot = await refreshRoster(config, map, client, new Date(), previous);
     if (recipeMapping) snapshot = withRecipeMapping(snapshot, recipeMapping);
     snapshot = await refreshRecipeDetails(snapshot, client, previous);
+    snapshot = await refreshAuctionPrices(snapshot, client, previous);
   }
   if (recipeMapping) snapshot = withRecipeMapping(snapshot, recipeMapping);
   await writeExports(snapshot, outputDirectory);
@@ -206,7 +208,16 @@ async function main(): Promise<void> {
   console.log(
     `Exported ${snapshot.rows.length} characters; ${incomplete} with incomplete API data. Recipe details: ${metadataEntries.length - metadataFailures} successful responses, ${metadataFailures} unavailable or retained. CSV, roster.xlsx, snapshot.json written.`,
   );
-  if (command === "refresh" && (incomplete || metadataFailures))
+  if (snapshot.auctionMarket)
+    console.log(
+      `Auction prices: ${snapshot.auctionPrices?.status === "ok" ? "snapshot retrieved" : "unavailable or retained"}.`,
+    );
+  if (
+    command === "refresh" &&
+    (incomplete ||
+      metadataFailures ||
+      (snapshot.auctionMarket && snapshot.auctionPrices?.status !== "ok"))
+  )
     process.exitCode = 2;
 }
 
