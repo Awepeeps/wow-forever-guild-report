@@ -203,7 +203,7 @@ A machine can load the same values from self-hosted Infisical instead; see [Load
 
 `just check` runs Biome lint/format checks, strict TypeScript, Bun behavior tests, high-severity dependency auditing, a publication path guard, and Gitleaks against Git history and working files. Run `just hooks` to opt into the repo's secret-checking pre-commit hook (this sets local `core.hooksPath`). CI runs the same recipes plus the offline demo and Varlock validation on PRs and branch pushes; no live secrets or guild exports enter CI or uploaded artifacts. Actions are pinned by commit, dependencies by exact version/lockfile; Dependabot checks updates weekly.
 
-There is no deployment service to run. For automation, schedule `just refresh` locally or on a trusted runner; add `just sheets` only when publishing is desired. Keep secrets on that machine/secret provider and handle exit code 2 explicitly. Do not place private roster artifacts in public CI logs/artifacts.
+There is no deployment service to run. For authorized recurring publication, `just daily` locks the refresh/publish cycle, backs up the snapshot, handles partial refreshes, checks freshness and blocks automatic retries after an uncertain Google write. See [daily refresh setup](docs/daily-refresh.md) for a systemd user timer at 7 AM Eastern, operating commands and recovery steps. The command and documentation are versioned; installing and enabling the timer is a separate machine setup step. For local exports only, schedule `just refresh`. Keep secrets on the trusted machine/secret provider. Do not place private roster artifacts in public CI logs/artifacts.
 
 Architecture and contributor rules are in [AGENTS.md](AGENTS.md); reusable repo skills are under [.agents/skills](.agents/skills).
 
