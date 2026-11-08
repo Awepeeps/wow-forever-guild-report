@@ -66,6 +66,24 @@ matched 16 price/quantity levels exactly; the other Alliance houses matched
 none. US Alliance Roleplay is therefore configured privately as ruleset 3
 (`Roleplay`), house 119. Repeat this comparison for any other market.
 
+## Seller fees
+
+Blizzard has not published Forever's auction house cut. Client data for build
+`1.60.1.70862` ([AuctionHouse](https://wago.tools/db2/AuctionHouse/csv?build=1.60.1.70862&format=csv))
+gives every faction house, including 119, `ConsignmentRate 5` and
+`DepositRate 5`; Blackwater houses have `15` and `25`. The same values appear in
+other WoW clients, so they show client configuration rather than proof of
+server behaviour. [BootyBayBroker](https://bootybaybroker.com/forever/arbitrage)
+also uses 5% for faction houses (15% for Blackwater, marked as assumed). A
+receipt from an actual sale would confirm the cut.
+
+Listing deposits are based on the item's vendor price and duration (Forever
+uses 2/8/24 hours), have an
+[official 1 silver minimum](https://us.support.blizzard.com/en/help/article/387079)
+as of 2026-11-08, are refunded when an auction sells and are lost on expiry or
+cancellation. Margins therefore subtract only the configured `saleCutPercent`;
+deposits are a risk on unsold listings, not a cost of a completed sale.
+
 ## Recipe columns
 
 The implementation shows crafted-output lowest buyout per item,
