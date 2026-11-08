@@ -5,6 +5,7 @@ import {
   characterSchema,
   type Profession,
   type RosterConfig,
+  recipeSchema,
   slugSchema,
 } from "./model.ts";
 
@@ -18,11 +19,22 @@ const profileSchema = z.object({
   faction: reference.optional(),
   race: reference.optional(),
   level: z.number().int().positive().optional(),
+  equipped_item_level: z.number().int().nonnegative().optional(),
+  average_item_level: z.number().int().nonnegative().optional(),
+  last_login_timestamp: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(253_402_300_799_999)
+    .optional(),
+  achievement_points: z.number().int().nonnegative().optional(),
+  experience: z.number().int().nonnegative().optional(),
 });
 const tierSchema = z.object({
   tier: reference.optional(),
   skill_points: z.number().int().nonnegative(),
   max_skill_points: z.number().int().nonnegative(),
+  known_recipes: z.array(recipeSchema.strip()).max(10_000).optional(),
 });
 const apiProfession = z.object({
   profession: reference,
@@ -46,10 +58,23 @@ const guildSchema = z.object({
           surname: z.string().optional(),
           slug: slugSchema.optional(),
           level: z.number().int().positive().optional(),
+          playable_class: z
+            .object({
+              id: z.number().int().positive(),
+              name: z.string().min(1).optional(),
+            })
+            .optional(),
         }),
       }),
     )
     .max(2_000),
+});
+const classIndexSchema = z.object({
+  classes: z
+    .array(
+      z.object({ id: z.number().int().positive(), name: z.string().min(1) }),
+    )
+    .max(100),
 });
 const tokenSchema = z.object({
   access_token: z.string().min(1),
@@ -93,6 +118,7 @@ function normalizeProfessions(
         skill: t.skill_points,
         max: t.max_skill_points,
         ...(t.tier ? { tier: t.tier.name } : {}),
+        ...(t.known_recipes === undefined ? {} : { recipes: t.known_recipes }),
       }));
     return [
       {
@@ -152,11 +178,17 @@ export class BlizzardClient {
     }
   }
 
-  private async get(path: string): Promise<unknown> {
+  private async get(
+    path: string,
+    namespace: "profile" | "static" = "profile",
+  ): Promise<unknown> {
     const url = new URL(
       `https://${this.config.region}.api.blizzard.com${path}`,
     );
-    url.searchParams.set("namespace", `profile-forever-${this.config.region}`);
+    url.searchParams.set(
+      "namespace",
+      `${namespace}-forever-${this.config.region}`,
+    );
     url.searchParams.set("locale", this.config.locale);
     return this.http.json("Blizzard API", url, {
       headers: { Authorization: `Bearer ${await this.accessToken()}` },
@@ -169,6 +201,26 @@ export class BlizzardClient {
       await this.get(`/data/wow/guild/${encodeURIComponent(slug)}/roster`),
       "guild roster",
     );
+    const classNames = new Map<number, string>();
+    if (
+      data.members.some(
+        ({ character }) =>
+          character.playable_class && !character.playable_class.name,
+      )
+    ) {
+      try {
+        const index = parseApi(
+          classIndexSchema,
+          await this.get("/data/wow/playable-class/index", "static"),
+          "class index",
+        );
+        for (const entry of index.classes) classNames.set(entry.id, entry.name);
+      } catch (error) {
+        // Optional roster metadata must not make valid guild discovery fail.
+        // Profile status remains independent, including unavailable characters.
+        if (isFatalApiError(error)) throw error;
+      }
+    }
     return data.members.map(({ character: c, rank }) => {
       const fullName = [c.name, c.surname].filter(Boolean).join(" ");
       if (!c.slug)
@@ -182,6 +234,12 @@ export class BlizzardClient {
           name: fullName,
           ...(c.id === undefined ? {} : { id: String(c.id) }),
           guildRank: rank,
+          class:
+            c.playable_class?.name ??
+            (c.playable_class
+              ? classNames.get(c.playable_class.id)
+              : undefined) ??
+            "",
           ...(c.level === undefined ? {} : { level: c.level }),
         },
         "guild member",
@@ -203,6 +261,13 @@ export class BlizzardClient {
       ...(p.faction ? { faction: p.faction.name } : {}),
       ...(p.race ? { race: p.race.name } : {}),
       ...(p.level ? { level: p.level } : {}),
+      equippedItemLevel: p.equipped_item_level,
+      averageItemLevel: p.average_item_level,
+      achievementPoints: p.achievement_points,
+      experience: p.experience,
+      lastLoginAt: p.last_login_timestamp
+        ? new Date(p.last_login_timestamp).toISOString()
+        : undefined,
     };
   }
 

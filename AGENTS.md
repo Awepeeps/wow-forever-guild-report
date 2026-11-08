@@ -10,7 +10,8 @@ The lead agent writes implementation code. Delegate research, analysis, and inde
 - `src/blizzard.ts`: the isolated Forever API adapter. No Retail paths or Armory HTML fallback.
 - `src/http.ts`: bounded retries/timeouts and safe errors. API response bodies, URLs with tokens, and credential values must not enter errors/logs.
 - `src/roster.ts`: guild discovery, independent enrichment, retained data, status, and sorting.
-- `src/workbook.ts`: pure table/CSV/OOXML renderers. Keep formulas and external links out of generated workbooks.
+- `src/workbook.ts`: pure table/CSV/OOXML renderers. Keep formulas out of XLSX/CSV. The user-requested view-relative Last Login in Google Sheets is the only generated-formula exception: a fixed DATE/TODAY template built from validated numeric date parts, never raw data or arbitrary expressions. Only deterministic HTTPS Armory/Wowhead public links requested by the user may be emitted; never accept arbitrary link targets from API/config data.
+- `src/presentation.ts`: shared column widths/visibility and readable class colors for XLSX and Google Sheets.
 - `src/sheets.ts`: explicit Google writes, ownership checks, preservation of human Notes.
 - `src/files.ts`, `src/import.ts`, `src/cli.ts`: private I/O, migration, command orchestration.
 
@@ -18,9 +19,11 @@ Keep validation at trust boundaries, pure transforms easy to test, and external 
 
 ## Domain invariants
 
-Forever identities are region + character ID where available, otherwise region + API slug. Names include a surname; rulesets replace realms. Prefer API slugs over reconstruction. Discord names/IDs stay strings. Guild rank is the numeric API value, not an inferred title.
+Forever identities are region + character ID where available, otherwise region + API slug. Names include a surname; rulesets replace realms. Prefer API slugs over reconstruction. Discord names/IDs stay strings. Guild rank stays the numeric API value; display names come only from the private guildRankNames mapping, never inference.
 
-Characters sort by Discord, then character name, unmapped last, with deterministic ties. Talent points come from `spent_points` for active groups; never guess a spec or sum different groups. Preserve every returned profession tier and secondary profession. Unknown is not zero.
+Characters and Professions sort by numeric guild rank, Discord, then character name, with unknown ranks last and unmapped Discord entries last within rank; ties are deterministic. Talent points come from `spent_points` for active groups; never guess a spec or sum different groups. Preserve every returned profession tier and secondary profession. Unknown is not zero.
+
+Tab order is Characters, Professions, Recipes, Guild Info, Automated Export Info. Professions has one row per character with primary and secondary summaries preserving all tiers. Recipes aggregates known recipe IDs by profession, deduplicates characters across tiers and labels retained/manual knowledge. Exact Wowhead crafting links use a separately imported, build-pinned SkillLineAbility.ID → Spell table persisted with provenance in the private snapshot; never hardcode per-recipe mappings or guess from names. Unmapped recipes remain unlinked and visibly marked until the map is updated. Missing recipe arrays mean unknown coverage, not zero recipes. Retain prior recipes for a matching profession/tier when a successful response omits its list, with a per-tier success timestamp and visible retained/incomplete status. An explicit empty list clears that knowledge; different professions/tiers never inherit it. Use the same Complete/Unavailable/Incomplete/Manual display enum on both roster tabs, with retained data marked Incomplete; Character status covers profile/talents and Profession status covers skills/recipes. Live-relative Last Login requires the validated en_US Sheets locale, uses the target timezone and hourly-or-faster recalculation; other locales stop before writing until their formula grammar is validated. XLSX/CSV are labelled static at-export snapshots in UTC. Keep technical diagnostics hidden and Player Notes (Editable) visible and independently human-owned on both roster tabs. Only owned legacy Data Notes/Export Notes tabs may migrate to Automated Export Info; never rename an unmanaged tab or overwrite a collision. Legacy Characters Notes migrates by header name and identity.
 
 A guild lookup/auth failure must not publish an empty successful roster. Individual endpoint failures keep prior/supplied data and mark it incomplete. Keep last-success timestamps when values are retained. `Generated At`/fetch times must not be represented as Blizzard update times.
 

@@ -1,6 +1,9 @@
 {
   "version": 1,
   "region": "us",
+  "guildRankNames": {
+    "2": "Example Veteran"
+  },
   "characters": [
     {
       "slug": "example-priest",
@@ -12,18 +15,62 @@
       "level": 17,
       "guildRank": 2,
       "talents": [
-        { "tree": "Shadow Magic", "points": 5 },
-        { "tree": "Discipline", "points": 2 }
+        {
+          "tree": "Shadow Magic",
+          "points": 5
+        },
+        {
+          "tree": "Discipline",
+          "points": 2
+        }
       ],
       "primary": [
-        { "name": "Alchemy", "skill": 72, "max": 150 },
-        { "name": "Herbalism", "skill": 81, "max": 150 }
+        {
+          "name": "Alchemy",
+          "skill": 72,
+          "max": 150,
+          "recipes": [
+            {
+              "id": 424242,
+              "name": "Example Training Tonic"
+            }
+          ]
+        },
+        {
+          "name": "Herbalism",
+          "skill": 81,
+          "max": 150,
+          "recipes": []
+        }
       ],
       "secondary": [
-        { "name": "Cooking", "skill": 20, "max": 75 },
-        { "name": "Fishing", "skill": 14, "max": 75 },
-        { "name": "First Aid", "skill": 30, "max": 75 }
-      ]
+        {
+          "name": "Cooking",
+          "skill": 20,
+          "max": 75,
+          "recipes": [
+            {
+              "id": 424243,
+              "name": "Example Camp Bread"
+            }
+          ]
+        },
+        {
+          "name": "Fishing",
+          "skill": 14,
+          "max": 75
+        },
+        {
+          "name": "First Aid",
+          "skill": 30,
+          "max": 75
+        }
+      ],
+      "equippedItemLevel": 12,
+      "averageItemLevel": 15,
+      "achievementPoints": 10,
+      "experience": 127,
+      "lastLoginAt": "2026-11-06T12:00:00.000Z"
     }
   ]
 }

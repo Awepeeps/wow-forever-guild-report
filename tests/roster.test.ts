@@ -2,7 +2,153 @@ import { describe, expect, test } from "bun:test";
 import { ApiError } from "../src/http.ts";
 import { characterSchema, configSchema, snapshotSchema } from "../src/model.ts";
 import { refreshRoster } from "../src/roster.ts";
+import { buildTables } from "../src/workbook.ts";
 import { config, now, snapshot, source } from "./helpers.ts";
+
+test("omitted recipe lists retain the same tier's knowledge with its own timestamp; explicit empty lists and different tiers do not", async () => {
+  const input = configSchema.parse({
+    ...config,
+    characters: [{ slug: "example-priest", name: "Example Priest" }],
+  });
+  const first = await refreshRoster(
+    input,
+    {},
+    source({
+      professions: async () => ({
+        primary: [
+          {
+            name: "Alchemy",
+            tier: "First",
+            skill: 50,
+            max: 75,
+            recipes: [{ id: 42, name: "Invented Tonic" }],
+          },
+        ],
+        secondary: [],
+      }),
+    }),
+    now,
+  );
+  const later = new Date("2026-11-08T16:00:00.000Z");
+  const current = await refreshRoster(
+    input,
+    {},
+    source({
+      professions: async () => ({
+        primary: [{ name: "Alchemy", tier: "First", skill: 51, max: 75 }],
+        secondary: [],
+      }),
+    }),
+    later,
+    first,
+  );
+  const p = current.rows[0]?.character.primary[0];
+  expect(p).toMatchObject({
+    skill: 51,
+    recipes: [{ id: 42, name: "Invented Tonic" }],
+    recipesRetained: true,
+    recipesFetchedAt: now.toISOString(),
+  });
+  expect(current.rows[0]?.professionStatus).toBe("ok");
+  expect(current.rows[0]?.professionFetchedAt).toBe(later.toISOString());
+  const tables = buildTables(current);
+  expect(tables[1]?.rows[1]).toContain("Incomplete");
+  expect(tables[0]?.rows[1]).toContain("Complete");
+  expect(tables[2]?.rows[1]?.[2]).toContain(
+    `[retained; last success: ${now.toISOString()}]`,
+  );
+  expect(tables[2]?.rows[1]?.[3]).toBe("Includes retained data");
+  for (const primary of [
+    [{ name: "Alchemy", tier: "First", skill: 51, max: 75, recipes: [] }],
+    [{ name: "Alchemy", tier: "Second", skill: 51, max: 75 }],
+    [{ name: "Cooking", tier: "First", skill: 51, max: 75 }],
+    [],
+  ]) {
+    const next = await refreshRoster(
+      input,
+      {},
+      source({ professions: async () => ({ primary, secondary: [] }) }),
+      later,
+      first,
+    );
+    expect(buildTables(next)[2]?.rows).toHaveLength(1);
+    expect(next.rows[0]?.character.primary[0]?.recipesRetained ?? false).toBe(
+      false,
+    );
+  }
+  const unavailable = async (): Promise<never> => {
+    throw new ApiError("Blizzard API", 404);
+  };
+  const failed = await refreshRoster(
+    input,
+    {},
+    source({ professions: unavailable }),
+    new Date("2026-11-09T16:00:00.000Z"),
+    current,
+  );
+  expect(failed.rows[0]?.character.primary[0]?.recipesFetchedAt).toBe(
+    now.toISOString(),
+  );
+  expect(buildTables(failed)[2]?.rows[1]?.[2]).toContain(now.toISOString());
+});
+
+test("failed components retain metrics/recipes and their success times, while successful omitted metrics become unknown", async () => {
+  const profile = {
+    equippedItemLevel: 12,
+    averageItemLevel: 15,
+    experience: 0,
+    achievementPoints: 20,
+    lastLoginAt: "2026-11-06T12:00:00.000Z",
+  };
+  const primary = [
+    { name: "Alchemy", recipes: [{ id: 42, name: "Invented Tonic" }] },
+  ];
+  const input = configSchema.parse({
+    ...config,
+    characters: [{ slug: "example-priest", name: "Example Priest" }],
+  });
+  const previous = await refreshRoster(
+    input,
+    {},
+    source({
+      profile: async () => profile,
+      professions: async () => ({ primary, secondary: [] }),
+    }),
+    now,
+  );
+  const unavailable = async (): Promise<never> => {
+    throw new ApiError("Blizzard API", 404);
+  };
+  const later = new Date("2026-11-08T16:00:00.000Z");
+  const result = await refreshRoster(
+    input,
+    {},
+    source({ profile: unavailable, professions: unavailable }),
+    later,
+    previous,
+  );
+  expect(result.rows[0]?.character).toMatchObject({ ...profile, primary });
+  expect(result.rows[0]?.profileFetchedAt).toBe(now.toISOString());
+  expect(result.rows[0]?.professionFetchedAt).toBe(now.toISOString());
+  const successful = await refreshRoster(
+    input,
+    {},
+    source({
+      profile: async () => ({
+        equippedItemLevel: undefined,
+        averageItemLevel: undefined,
+        experience: undefined,
+        achievementPoints: undefined,
+        lastLoginAt: undefined,
+      }),
+    }),
+    later,
+    previous,
+  );
+  expect(successful.rows[0]?.character.experience).toBeUndefined();
+  expect(successful.rows[0]?.character.lastLoginAt).toBeUndefined();
+  expect(successful.rows[0]?.profileFetchedAt).toBe(later.toISOString());
+});
 
 describe("guild roster refresh", () => {
   test("stable-ID renames retain enrichment and success times for guild and explicit discovery", async () => {
@@ -456,4 +602,51 @@ test("groups Discord alts, uses deterministic character order, puts unmapped las
   );
   expect(partial.rows[0]?.professionFetchedAt).toBe(now.toISOString());
   expect(partial.rows[0]?.fetchedAt).toBe(later.toISOString());
+});
+
+test("rank labels validate at config boundaries, survive snapshots, and ranks control stored sort order", async () => {
+  for (const key of ["-1", "01", "1000", "1.5", "name"]) {
+    expect(
+      configSchema.safeParse({ ...config, guildRankNames: { [key]: "Label" } })
+        .success,
+    ).toBe(false);
+  }
+  expect(
+    configSchema.safeParse({ ...config, guildRankNames: { "0": "   " } })
+      .success,
+  ).toBe(false);
+  expect(
+    snapshotSchema.parse({ ...snapshot, guildRankNames: undefined })
+      .guildRankNames,
+  ).toEqual({});
+  const cfg = configSchema.parse({
+    ...config,
+    guildRankNames: { "0": " Guild Master ", "1": "Officer" },
+    characters: [],
+  });
+  const result = await refreshRoster(
+    cfg,
+    { "us:leader": "Zebra", "us:officer": "Alice" },
+    source({
+      guild: async () => [
+        characterSchema.parse({
+          slug: "officer",
+          name: "Officer",
+          guildRank: 1,
+        }),
+        characterSchema.parse({ slug: "leader", name: "Leader", guildRank: 0 }),
+        characterSchema.parse({ slug: "unknown", name: "Unknown" }),
+      ],
+    }),
+    now,
+  );
+  expect(result.rows.map((r) => r.character.slug)).toEqual([
+    "leader",
+    "officer",
+    "unknown",
+  ]);
+  expect(snapshotSchema.parse(result).guildRankNames).toEqual({
+    "0": "Guild Master",
+    "1": "Officer",
+  });
 });

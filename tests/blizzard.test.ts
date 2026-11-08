@@ -186,3 +186,173 @@ test("OAuth network, JSON and token-schema failures abort enrichment instead of 
     );
   }
 });
+
+test("profile metrics are numeric, last login converts epoch milliseconds, and missing values remain unknown", async () => {
+  let response: unknown = {
+    name: "Example",
+    surname: "Priest",
+    equipped_item_level: 12,
+    average_item_level: 15,
+    achievement_points: 0,
+    experience: 127,
+    last_login_timestamp: 1_794_052_800_000,
+  };
+  const client = new BlizzardClient(
+    { region: "us", locale: "en_US" },
+    { clientId: "test-id", clientSecret: "test-secret" },
+    new HttpClient(async (url) =>
+      Response.json(
+        String(url).endsWith("/token")
+          ? { access_token: "test-token", expires_in: 3600 }
+          : response,
+      ),
+    ),
+  );
+  const profile = await client.profile("example-priest");
+  expect(profile).toMatchObject({
+    equippedItemLevel: 12,
+    averageItemLevel: 15,
+    achievementPoints: 0,
+    experience: 127,
+  });
+  expect(profile.lastLoginAt).toBe(new Date(1_794_052_800_000).toISOString());
+  response = { name: "Example", last_login_timestamp: 0 };
+  const empty = await client.profile("example-priest");
+  expect(empty.lastLoginAt).toBeUndefined();
+  expect(empty.experience).toBeUndefined();
+  expect(Object.hasOwn(empty, "experience")).toBe(true);
+  response = { name: "Example", last_login_timestamp: -1 };
+  await expect(client.profile("example-priest")).rejects.toThrow(
+    "unsupported shape",
+  );
+});
+
+test("professions preserve known recipe IDs/names per tier and distinguish omitted from empty knowledge", async () => {
+  let recipe: unknown = {
+    id: 42,
+    name: "Invented Tonic",
+    key: { href: "https://untrusted.invalid/never-follow" },
+  };
+  const client = new BlizzardClient(
+    { region: "us", locale: "en_US" },
+    { clientId: "test-id", clientSecret: "test-secret" },
+    new HttpClient(async (url) =>
+      Response.json(
+        String(url).endsWith("/token")
+          ? { access_token: "test-token", expires_in: 3600 }
+          : {
+              character: { slug: "example-priest" },
+              primaries: [
+                {
+                  profession: { name: "Alchemy" },
+                  tiers: [
+                    {
+                      tier: { name: "First" },
+                      skill_points: 0,
+                      max_skill_points: 75,
+                      known_recipes: [recipe],
+                    },
+                    {
+                      tier: { name: "Second" },
+                      skill_points: 1,
+                      max_skill_points: 75,
+                      known_recipes: [],
+                    },
+                    {
+                      tier: { name: "Third" },
+                      skill_points: 2,
+                      max_skill_points: 75,
+                    },
+                  ],
+                },
+              ],
+            },
+      ),
+    ),
+  );
+  const result = await client.professions("example-priest");
+  expect(result.primary.map((p) => p.recipes)).toEqual([
+    [{ id: 42, name: "Invented Tonic" }],
+    [],
+    undefined,
+  ]);
+  expect(JSON.stringify(result)).not.toContain("untrusted");
+  recipe = { id: -1, name: "Invalid" };
+  await expect(client.professions("example-priest")).rejects.toThrow(
+    "unsupported shape",
+  );
+});
+
+test("guild class references resolve through the Forever class index even when character APIs return 404", async () => {
+  for (const classIndexFails of [false, true]) {
+    const urls: string[] = [];
+    const client = new BlizzardClient(
+      { region: "us", locale: "en_US" },
+      { clientId: "test-id", clientSecret: "test-secret" },
+      new HttpClient(async (input) => {
+        const url = new URL(input);
+        urls.push(url.toString());
+        if (url.pathname.endsWith("/token"))
+          return Response.json({
+            access_token: "test-token",
+            expires_in: 3600,
+          });
+        if (url.pathname === "/data/wow/playable-class/index") {
+          expect(url.searchParams.get("namespace")).toBe("static-forever-us");
+          return classIndexFails
+            ? new Response(null, { status: 404 })
+            : Response.json({ classes: [{ id: 101, name: "Invented Class" }] });
+        }
+        expect(url.searchParams.get("namespace")).toBe("profile-forever-us");
+        if (url.pathname.endsWith("/roster"))
+          return Response.json({
+            members: [
+              {
+                rank: 2,
+                character: {
+                  id: 10101,
+                  name: "Example",
+                  surname: "Member",
+                  slug: "example-member",
+                  level: 12,
+                  playable_class: {
+                    id: 101,
+                    key: { href: "https://untrusted.invalid/never-follow" },
+                  },
+                },
+              },
+              {
+                rank: 2,
+                character: {
+                  id: 10102,
+                  name: "Another",
+                  surname: "Member",
+                  slug: "another-member",
+                  level: 5,
+                  playable_class: { id: 102 },
+                },
+              },
+            ],
+          });
+        return new Response(null, { status: 404 });
+      }),
+    );
+    const result = await refreshRoster(
+      configSchema.parse({ version: 1, region: "us", guild: "example-guild" }),
+      {},
+      client,
+    );
+    const row = result.rows.find((r) => r.character.slug === "example-member");
+    expect(row?.character.class).toBe(classIndexFails ? "" : "Invented Class");
+    expect(row?.profileStatus).toBe("unavailable");
+    expect(row?.profileFetchedAt).toBeNull();
+    expect(
+      result.rows.find((r) => r.character.slug === "another-member")?.character
+        .class,
+    ).toBe("");
+    expect(
+      urls.filter((u) => u.includes("/playable-class/index")),
+    ).toHaveLength(1);
+    expect(urls.some((u) => u.includes("untrusted.invalid"))).toBe(false);
+  }
+});

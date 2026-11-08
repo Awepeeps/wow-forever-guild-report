@@ -9,12 +9,23 @@ export const slugSchema = z
   .min(1)
   .max(200)
   .regex(/^[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*$/u);
+export const recipeSchema = z
+  .object({
+    id: z.number().int().positive(),
+    name: z.string().trim().min(1).max(200),
+  })
+  .strict();
+export type Recipe = z.infer<typeof recipeSchema>;
 export const professionSchema = z
   .object({
     name,
     skill: z.number().int().nonnegative().optional(),
     max: z.number().int().nonnegative().optional(),
     tier: name.optional(),
+    // Omitted means recipe coverage is unknown (including older snapshots).
+    recipes: z.array(recipeSchema).max(10_000).optional(),
+    recipesRetained: z.boolean().optional(),
+    recipesFetchedAt: z.iso.datetime().nullable().optional(),
   })
   .strict()
   .refine(
@@ -34,6 +45,11 @@ export const characterSchema = z
     race: text.default(""),
     level: z.number().int().min(1).max(1_000).optional(),
     guildRank: z.number().int().nonnegative().max(999).optional(),
+    equippedItemLevel: z.number().int().nonnegative().optional(),
+    averageItemLevel: z.number().int().nonnegative().optional(),
+    lastLoginAt: z.iso.datetime().optional(),
+    achievementPoints: z.number().int().nonnegative().optional(),
+    experience: z.number().int().nonnegative().optional(),
     talents: z
       .array(
         z
@@ -51,6 +67,11 @@ export const characterSchema = z
   })
   .strict();
 export type Character = z.infer<typeof characterSchema>;
+export function hasRetainedRecipes(character: Character): boolean {
+  return [...character.primary, ...character.secondary].some(
+    (p) => p.recipesRetained,
+  );
+}
 type Identity = { slug: string; id?: string | undefined };
 
 export function characterIdentity(character: Identity): string {
@@ -87,6 +108,9 @@ const characterOverrideSchema = characterSchema.extend({
   secondary: characterSchema.shape.secondary.removeDefault().optional(),
 });
 export const regionSchema = z.enum(["us", "eu", "kr", "tw"]);
+const guildRankNamesSchema = z
+  .record(z.string().regex(/^(?:0|[1-9]\d{0,2})$/), name)
+  .default({});
 export const configSchema = z
   .object({
     version: z.literal(1),
@@ -108,6 +132,7 @@ export const configSchema = z
       ])
       .default("en_US"),
     guild: slugSchema.optional(),
+    guildRankNames: guildRankNamesSchema,
     characters: z.array(characterOverrideSchema).max(2_000).default([]),
   })
   .strict()
@@ -137,12 +162,28 @@ export const rowSchema = z
   })
   .strict();
 export type RosterRow = z.infer<typeof rowSchema>;
+export const foreverBuildSchema = z.string().regex(/^1\.60\.\d{1,3}\.\d{4,6}$/);
+export const spellIdSchema = z.number().int().positive().max(2_147_483_647);
+export const recipeMappingSchema = z
+  .object({
+    build: foreverBuildSchema,
+    source: z.literal("wago.tools/SkillLineAbility"),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    fetchedAt: z.iso.datetime(),
+    spells: z
+      .record(z.string().regex(/^[1-9]\d{0,9}$/), spellIdSchema)
+      .refine((entries) => Object.keys(entries).length <= 20_000),
+  })
+  .strict();
+export type RecipeMapping = z.infer<typeof recipeMappingSchema>;
 export const snapshotSchema = z
   .object({
     version: z.literal(1),
     region: regionSchema,
     generatedAt: z.iso.datetime(),
     guild: z.string().nullable(),
+    guildRankNames: guildRankNamesSchema,
+    recipeMapping: recipeMappingSchema.optional(),
     rows: z.array(rowSchema).max(2_000),
   })
   .strict()
@@ -188,6 +229,8 @@ export function sortRows(rows: RosterRow[]): RosterRow[] {
     a.localeCompare(b, "en");
   return rows.sort(
     (a, b) =>
+      (a.character.guildRank ?? Number.MAX_SAFE_INTEGER) -
+        (b.character.guildRank ?? Number.MAX_SAFE_INTEGER) ||
       Number(!a.discord) - Number(!b.discord) ||
       compare(a.discord, b.discord) ||
       compare(a.character.name, b.character.name) ||
@@ -205,6 +248,7 @@ export function manualSnapshot(
     region: config.region,
     generatedAt: now.toISOString(),
     guild: config.guild ?? null,
+    guildRankNames: config.guildRankNames,
     rows: sortRows(
       config.characters.map((entry) => ({
         character: characterSchema.parse(entry),

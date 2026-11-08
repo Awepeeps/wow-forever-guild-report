@@ -6,6 +6,8 @@ import {
   characterSchema,
   discordFor,
   duplicateCharacterIndices,
+  hasRetainedRecipes,
+  type Profession,
   type RosterConfig,
   type RosterRow,
   type Snapshot,
@@ -20,6 +22,47 @@ export interface RosterSource {
 }
 
 class IdentityConflictError extends SafeError {}
+
+function refreshRecipeKnowledge(
+  current: Profession[],
+  previous: Profession[],
+  fetchedAt: string,
+  priorFetchedAt: string | null,
+): Profession[] {
+  const key = (p: Profession) =>
+    JSON.stringify([
+      p.name.toLocaleLowerCase("en-US"),
+      (p.tier ?? "").toLocaleLowerCase("en-US"),
+    ]);
+  return current.map((profession) => {
+    if (profession.recipes !== undefined)
+      return {
+        ...profession,
+        recipesRetained: false,
+        recipesFetchedAt: fetchedAt,
+      };
+    const matches = previous.filter(
+      (p) => key(p) === key(profession) && p.recipes !== undefined,
+    );
+    if (matches.length > 1)
+      throw new SafeError(
+        "Ambiguous recipe history for a profession tier; retained prior profession data.",
+      );
+    const old = matches[0];
+    return old
+      ? {
+          ...profession,
+          recipes: old.recipes,
+          recipesRetained: true,
+          // null is deliberately preserved: a manual baseline has no success time.
+          recipesFetchedAt:
+            old.recipesFetchedAt === undefined
+              ? priorFetchedAt
+              : old.recipesFetchedAt,
+        }
+      : profession;
+  });
+}
 
 export async function refreshRoster(
   config: RosterConfig,
@@ -85,6 +128,7 @@ export async function refreshRoster(
             name: c.name,
             ...(c.id === undefined ? {} : { id: c.id }),
             ...(c.level === undefined ? {} : { level: c.level }),
+            ...(c.class ? { class: c.class } : {}),
             ...(c.guildRank === undefined ? {} : { guildRank: c.guildRank }),
           }
         : c,
@@ -137,7 +181,27 @@ export async function refreshRoster(
       };
       for (const component of ["profile", "professions", "talents"] as const) {
         try {
-          const update = await source[component](original.slug);
+          const response: Partial<Character> = await source[component](
+            original.slug,
+          );
+          const update =
+            component === "professions"
+              ? {
+                  ...response,
+                  primary: refreshRecipeKnowledge(
+                    response.primary ?? [],
+                    character.primary,
+                    fetchedAt,
+                    row.professionFetchedAt,
+                  ),
+                  secondary: refreshRecipeKnowledge(
+                    response.secondary ?? [],
+                    character.secondary,
+                    fetchedAt,
+                    row.professionFetchedAt,
+                  ),
+                }
+              : response;
           if (
             "id" in update &&
             update.id &&
@@ -149,9 +213,12 @@ export async function refreshRoster(
             );
           character = characterSchema.parse({ ...character, ...update });
           if (component === "profile") row.profileFetchedAt = fetchedAt;
-          else if (component === "professions")
+          else if (component === "professions") {
             row.professionFetchedAt = fetchedAt;
-          else row.talentFetchedAt = fetchedAt;
+            if (hasRetainedRecipes(character))
+              row.issue +=
+                "professions: recipe lists omitted; retained prior tier knowledge with its original success time. ";
+          } else row.talentFetchedAt = fetchedAt;
         } catch (error) {
           if (error instanceof IdentityConflictError || isFatalApiError(error))
             throw error;
@@ -188,6 +255,7 @@ export async function refreshRoster(
     version: 1,
     region: config.region,
     guild: config.guild ?? null,
+    guildRankNames: config.guildRankNames,
     generatedAt: fetchedAt,
     rows,
   };

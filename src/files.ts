@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { z } from "zod";
 import { SafeError } from "./http.ts";
 import type { Snapshot } from "./model.ts";
+import { exportHeader } from "./presentation.ts";
 import { buildTables, toCsv, toXlsx } from "./workbook.ts";
 
 export async function readJson<T>(
@@ -58,7 +59,11 @@ export async function writeExports(
   for (const table of tables)
     await atomicWrite(
       join(directory, `${table.name.toLowerCase().replaceAll(" ", "-")}.csv`),
-      toCsv(table.rows),
+      toCsv(
+        table.rows.map((row, i) =>
+          i === 0 ? row.map((cell) => exportHeader(table.name, cell)) : row,
+        ),
+      ),
     );
   await atomicWrite(join(directory, "roster.xlsx"), toXlsx(tables));
   await atomicWrite(
