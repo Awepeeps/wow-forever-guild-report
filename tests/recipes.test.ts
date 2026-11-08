@@ -51,7 +51,10 @@ test("recipe lookup preserves distinct IDs, deduplicates tiers and sorts profess
     ["Alchemy", 43],
     ["Cooking", 1],
   ]);
-  expect(recipes[0]?.knowers.map((r) => r.character.id)).toEqual(["1", "2"]);
+  expect(recipes[0]?.knowers.map((r) => r.row.character.id)).toEqual([
+    "1",
+    "2",
+  ]);
   const tables = buildTables(input);
   const lookup = tables.find((t) => t.name === "Recipes");
   expect(lookup?.rows).toHaveLength(4);
@@ -109,6 +112,55 @@ test("recipe coverage distinguishes unknown, empty, partial, retained and manual
   ).toHaveLength(1);
 });
 
+test("current evidence in another tier supersedes a retained duplicate without hiding other retained recipes", () => {
+  const base = snapshot.rows[0];
+  if (!base) throw new Error("fixture");
+  const input = {
+    ...snapshot,
+    rows: [
+      {
+        ...base,
+        professionStatus: "ok" as const,
+        character: {
+          ...base.character,
+          primary: [
+            {
+              name: "Alchemy",
+              tier: "First",
+              recipes: [
+                { id: 42, name: "Tonic" },
+                { id: 43, name: "Elixir" },
+              ],
+              recipesRetained: true,
+              recipesFetchedAt: "2026-11-05T12:00:00.000Z",
+            },
+            {
+              name: "Alchemy",
+              tier: "Second",
+              recipes: [{ id: 42, name: "Tonic" }],
+              recipesFetchedAt: "2026-11-07T12:00:00.000Z",
+            },
+          ],
+          secondary: [],
+        },
+      },
+    ],
+  };
+  const recipes = knownRecipes(input);
+  expect(recipes.find((r) => r.id === 42)?.knowers).toHaveLength(1);
+  expect(recipes.find((r) => r.id === 42)?.knowers[0]).toMatchObject({
+    status: "current",
+    fetchedAt: "2026-11-07T12:00:00.000Z",
+  });
+  expect(recipes.find((r) => r.id === 43)?.knowers[0]).toMatchObject({
+    status: "retained",
+    fetchedAt: "2026-11-05T12:00:00.000Z",
+  });
+  const row = input.rows[0];
+  if (!row) throw new Error("fixture");
+  expect(recipeCoverage(row)).toBe("Partial");
+});
+
 test("large knower lists continue without truncation within Excel cell limits", () => {
   const base = snapshot.rows[0];
   if (!base) throw new Error("fixture");
@@ -122,7 +174,9 @@ test("large knower lists continue without truncation within Excel cell limits", 
       name: `Character ${i}`,
     },
   }));
-  const chunks = knowerChunks(rows);
+  const chunks = knowerChunks(
+    rows.map((row) => ({ row, status: "manual", fetchedAt: null })),
+  );
   expect(chunks.length).toBeGreaterThan(1);
   expect(chunks.every((c) => c.length <= 30_000)).toBe(true);
   expect(chunks.join("\n").split("\n")).toHaveLength(2000);

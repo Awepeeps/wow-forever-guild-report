@@ -5,7 +5,12 @@ import {
   recipeUrl,
   validatedLinks,
 } from "./links.ts";
-import { type Profession, type Snapshot, sortRows } from "./model.ts";
+import {
+  hasRetainedRecipes,
+  type Profession,
+  type Snapshot,
+  sortRows,
+} from "./model.ts";
 import {
   classStyle,
   columnPresentation,
@@ -83,7 +88,9 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ];
     const professionStatus =
       row.professionStatus === "ok"
-        ? "Complete"
+        ? hasRetainedRecipes(c)
+          ? "Skills current; recipes retained"
+          : "Complete"
         : row.professionStatus === "manual"
           ? "Manual"
           : c.primary.length || c.secondary.length
@@ -112,7 +119,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
         .join(", "),
       statuses.every((s) => s === "manual")
         ? "Manual"
-        : statuses.every((s) => s === "ok")
+        : statuses.every((s) => s === "ok") && !hasRetainedRecipes(c)
           ? "Complete"
           : "Incomplete",
       "",
@@ -180,11 +187,9 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
   ];
   for (const recipe of recipeEntries) {
-    const status = recipe.knowers.some((r) =>
-      ["error", "unavailable"].includes(r.professionStatus),
-    )
+    const status = recipe.knowers.some((r) => r.status === "retained")
       ? "Includes retained data"
-      : recipe.knowers.some((r) => r.professionStatus === "manual")
+      : recipe.knowers.some((r) => r.status === "manual")
         ? "Includes manual data"
         : "Current reports";
     for (const chunk of knowerChunks(recipe.knowers))
@@ -250,7 +255,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "API status",
-      "Incomplete means at least one API component failed; retained values may be older than this export. Unhide the individual statuses and last-success columns to identify which component is stale. Profession API Status labels retained data explicitly.",
+      "Incomplete means at least one API component failed or recipe knowledge was retained after an omitted recipe list; retained values may be older than this export. Unhide the individual statuses and last-success columns to identify which component is stale. Profession API Status labels retained data explicitly.",
     ],
     [
       "Identity",
@@ -291,7 +296,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Recipes",
-      "Recipes lists profession, recipe and known characters (with Discord), sorted by profession then recipe. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests retain known recipes with per-character last-success labels. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
+      "Recipes lists profession, recipe and known characters (with Discord), sorted by profession then recipe. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests retain known recipes with per-character last-success labels. Successful responses omitting recipe lists retain only the same profession/tier knowledge and its original recipe-specific timestamp; explicit empty lists clear it. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
     ],
     [
       "Public links",

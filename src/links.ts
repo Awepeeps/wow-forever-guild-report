@@ -39,6 +39,7 @@ export function assertPublicLink(value: string): void {
       url.hostname === "www.wowhead.com" &&
       url.pathname === "/forever/search" &&
       [...url.searchParams.keys()].length === 1 &&
+      url.searchParams.getAll("q").length === 1 &&
       url.searchParams.has("q") &&
       (url.searchParams.get("q")?.trim().length ?? 0) > 0 &&
       (url.searchParams.get("q")?.length ?? 0) <= 200

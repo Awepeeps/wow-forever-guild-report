@@ -2,7 +2,95 @@ import { describe, expect, test } from "bun:test";
 import { ApiError } from "../src/http.ts";
 import { characterSchema, configSchema, snapshotSchema } from "../src/model.ts";
 import { refreshRoster } from "../src/roster.ts";
+import { buildTables } from "../src/workbook.ts";
 import { config, now, snapshot, source } from "./helpers.ts";
+
+test("omitted recipe lists retain the same tier's knowledge with its own timestamp; explicit empty lists and different tiers do not", async () => {
+  const input = configSchema.parse({
+    ...config,
+    characters: [{ slug: "example-priest", name: "Example Priest" }],
+  });
+  const first = await refreshRoster(
+    input,
+    {},
+    source({
+      professions: async () => ({
+        primary: [
+          {
+            name: "Alchemy",
+            tier: "First",
+            skill: 50,
+            max: 75,
+            recipes: [{ id: 42, name: "Invented Tonic" }],
+          },
+        ],
+        secondary: [],
+      }),
+    }),
+    now,
+  );
+  const later = new Date("2026-11-08T16:00:00.000Z");
+  const current = await refreshRoster(
+    input,
+    {},
+    source({
+      professions: async () => ({
+        primary: [{ name: "Alchemy", tier: "First", skill: 51, max: 75 }],
+        secondary: [],
+      }),
+    }),
+    later,
+    first,
+  );
+  const p = current.rows[0]?.character.primary[0];
+  expect(p).toMatchObject({
+    skill: 51,
+    recipes: [{ id: 42, name: "Invented Tonic" }],
+    recipesRetained: true,
+    recipesFetchedAt: now.toISOString(),
+  });
+  expect(current.rows[0]?.professionStatus).toBe("ok");
+  expect(current.rows[0]?.professionFetchedAt).toBe(later.toISOString());
+  const tables = buildTables(current);
+  expect(tables[1]?.rows[1]).toContain("Skills current; recipes retained");
+  expect(tables[0]?.rows[1]).toContain("Incomplete");
+  expect(tables[2]?.rows[1]?.[2]).toContain(
+    `[retained; last success: ${now.toISOString()}]`,
+  );
+  expect(tables[2]?.rows[1]?.[3]).toBe("Includes retained data");
+  for (const primary of [
+    [{ name: "Alchemy", tier: "First", skill: 51, max: 75, recipes: [] }],
+    [{ name: "Alchemy", tier: "Second", skill: 51, max: 75 }],
+    [{ name: "Cooking", tier: "First", skill: 51, max: 75 }],
+    [],
+  ]) {
+    const next = await refreshRoster(
+      input,
+      {},
+      source({ professions: async () => ({ primary, secondary: [] }) }),
+      later,
+      first,
+    );
+    expect(buildTables(next)[2]?.rows).toHaveLength(1);
+    expect(next.rows[0]?.character.primary[0]?.recipesRetained ?? false).toBe(
+      false,
+    );
+  }
+  const unavailable = async (): Promise<never> => {
+    throw new ApiError("Blizzard API", 404);
+  };
+  const failed = await refreshRoster(
+    input,
+    {},
+    source({ professions: unavailable }),
+    new Date("2026-11-09T16:00:00.000Z"),
+    current,
+  );
+  expect(failed.rows[0]?.character.primary[0]?.recipesFetchedAt).toBe(
+    now.toISOString(),
+  );
+  expect(buildTables(failed)[2]?.rows[1]?.[2]).toContain(now.toISOString());
+});
 
 test("failed components retain metrics/recipes and their success times, while successful omitted metrics become unknown", async () => {
   const profile = {

@@ -24,6 +24,8 @@ export const professionSchema = z
     tier: name.optional(),
     // Omitted means recipe coverage is unknown (including older snapshots).
     recipes: z.array(recipeSchema).max(10_000).optional(),
+    recipesRetained: z.boolean().optional(),
+    recipesFetchedAt: z.iso.datetime().nullable().optional(),
   })
   .strict()
   .refine(
@@ -65,6 +67,11 @@ export const characterSchema = z
   })
   .strict();
 export type Character = z.infer<typeof characterSchema>;
+export function hasRetainedRecipes(character: Character): boolean {
+  return [...character.primary, ...character.secondary].some(
+    (p) => p.recipesRetained,
+  );
+}
 type Identity = { slug: string; id?: string | undefined };
 
 export function characterIdentity(character: Identity): string {

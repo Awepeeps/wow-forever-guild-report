@@ -17,6 +17,7 @@ test("public links use encoded Forever slugs and Wowhead name searches, never re
   expect(() => assertPublicLink(armoryUrl("eu", "élise-o’neil"))).not.toThrow();
   for (const target of [
     "javascript:alert(1)",
+    "https://www.wowhead.com/forever/search?q=a&q=b",
     "file:///etc/passwd",
     "http://www.wowhead.com/forever/search?q=Example",
     "https://www.wowhead.com.evil.invalid/forever/search?q=Example",

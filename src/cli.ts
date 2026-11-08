@@ -9,6 +9,7 @@ import { importCsv } from "./import.ts";
 import {
   configSchema,
   discordMapSchema,
+  hasRetainedRecipes,
   manualSnapshot,
   regionSchema,
   snapshotSchema,
@@ -166,10 +167,12 @@ async function main(): Promise<void> {
     );
   }
   await writeExports(snapshot, outputDirectory);
-  const incomplete = snapshot.rows.filter((r) =>
-    [r.profileStatus, r.professionStatus, r.talentStatus].some(
-      (s) => s === "unavailable" || s === "error",
-    ),
+  const incomplete = snapshot.rows.filter(
+    (r) =>
+      hasRetainedRecipes(r.character) ||
+      [r.profileStatus, r.professionStatus, r.talentStatus].some(
+        (s) => s === "unavailable" || s === "error",
+      ),
   ).length;
   console.log(
     `Exported ${snapshot.rows.length} characters; ${incomplete} with incomplete API data. CSV, roster.xlsx, snapshot.json written.`,
