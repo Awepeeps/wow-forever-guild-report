@@ -470,9 +470,10 @@ test("class formatting preserves names, uses readable text, and hides diagnostic
     };
   }[];
   const classValue = requests.find((r) => r.updateCells)?.updateCells?.rows[1]
-    ?.values[2];
+    ?.values[table.rows[0]?.indexOf("Class") ?? -1];
   const classCell = requests.find(
-    (r) => r.updateCells?.start?.columnIndex === 2,
+    (r) =>
+      r.updateCells?.start?.columnIndex === table.rows[0]?.indexOf("Class"),
   )?.updateCells?.rows[0]?.values[0];
   expect(classValue?.userEnteredValue?.stringValue).toBe("Shaman");
   expect(classCell?.userEnteredFormat?.backgroundColor).toEqual(rgb("0070DE"));

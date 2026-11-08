@@ -102,19 +102,20 @@ test("compact roster keeps skills in Professions and hides technical columns wit
   expect(characters.rows[0]?.slice(0, 14)).toEqual([
     "Discord",
     "Character Name",
+    "Guild Rank",
     "Class",
     "Level",
-    "Guild Rank",
-    "Equipped ilvl",
+    "Talent Points",
+    "Achievement Points",
+    "iLvl",
+    "Last Login",
+    "Character API Status",
+    "Player Notes (Editable)",
     "Average ilvl",
     "Last Login (UTC)",
-    "Achievement Points",
-    "XP (API)",
-    "Talent Points",
-    "API Status",
-    "Player Notes (Editable)",
     "Generated At",
   ]);
+  expect(characters.rows[0]).not.toContain("XP (API)");
   expect(
     characters.rows[0]
       ?.slice(0, 9)
@@ -146,7 +147,7 @@ test("compact roster keeps skills in Professions and hides technical columns wit
   expect(sheet).toContain(
     'min="15" max="15" width="25.71" customWidth="1" hidden="1"',
   );
-  expect(sheet).toContain('r="C2" s="2"');
+  expect(sheet).toContain('r="D2" s="2"');
   expect(styles).toContain('rgb="FF0070DE"');
   expect(toCsv(characters.rows)).toContain("Character Slug");
 });
@@ -238,10 +239,16 @@ test("profession summaries retain every tier, distinguish zero/unknown, and both
   const chars = tables[0],
     prof = tables[1];
   if (!chars || !prof) throw new Error("fixture");
-  expect(chars.rows[1]?.[4]).toBe("Guild Master");
-  expect(chars.rows[2]?.[4]).toBe("Officer");
-  expect(chars.rows[5]?.[4]).toBe("Rank 2 (unmapped)");
-  expect(chars.rows[6]?.[4]).toBe("");
+  expect(chars.rows[1]?.[chars.rows[0]?.indexOf("Guild Rank") ?? -1]).toBe(
+    "Guild Master",
+  );
+  expect(chars.rows[2]?.[chars.rows[0]?.indexOf("Guild Rank") ?? -1]).toBe(
+    "Officer",
+  );
+  expect(chars.rows[5]?.[chars.rows[0]?.indexOf("Guild Rank") ?? -1]).toBe(
+    "Rank 2 (unmapped)",
+  );
+  expect(chars.rows[6]?.[chars.rows[0]?.indexOf("Guild Rank") ?? -1]).toBe("");
   expect(
     chars.rows[1]?.[chars.rows[0]?.indexOf("Guild Rank Number") ?? -1],
   ).toBe(0);

@@ -1,5 +1,6 @@
 import { createSign } from "node:crypto";
 import { z } from "zod";
+import { relativeLoginFormula, validatedRelativeDates } from "./dates.ts";
 import { readJson } from "./files.ts";
 import { HttpClient, SafeError } from "./http.ts";
 import { validatedLinks } from "./links.ts";
@@ -46,6 +47,12 @@ function slugKey(
 }
 const marker = "wow-forever-guild-report-v1";
 const spreadsheetSchema = z.object({
+  properties: z
+    .object({
+      timeZone: z.string().optional(),
+      autoRecalc: z.enum(["ON_CHANGE", "MINUTE", "HOUR"]).default("ON_CHANGE"),
+    })
+    .default({ autoRecalc: "ON_CHANGE" }),
   sheets: z.array(
     z.object({
       properties: z.object({
@@ -231,10 +238,17 @@ export function sheetRequests(
   tables: Table[],
   existing: { sheetId: number; title: string }[],
   notesByTable: NotesByTable = {},
+  timeZone = "UTC",
 ): unknown[] {
   const used = new Set(existing.map((s) => s.sheetId));
   const requests: unknown[] = [];
   for (const [index, table] of tables.entries()) {
+    const dates = new Map(
+      validatedRelativeDates(table).map((date) => [
+        `${date.row}:${date.column}`,
+        relativeLoginFormula(date.timestamp, timeZone),
+      ]),
+    );
     const links = validatedLinks(table.rows, table.links);
     const title = table.name;
     let id = existing.find((s) => s.title === title)?.sheetId;
@@ -315,9 +329,11 @@ export function sheetRequests(
             userEnteredValue:
               r > 0 && c === noteColumn
                 ? (noteFor(row)?.userEnteredValue ?? { stringValue: "" })
-                : typeof cell === "number"
-                  ? { numberValue: cell }
-                  : { stringValue: cell },
+                : dates.has(`${r}:${c}`)
+                  ? { formulaValue: `=${dates.get(`${r}:${c}`)}` }
+                  : typeof cell === "number"
+                    ? { numberValue: cell }
+                    : { stringValue: cell },
           })),
         })),
         fields: "userEnteredValue",
@@ -527,12 +543,19 @@ export async function publishSheets(
   const parsed = spreadsheetSchema.safeParse(
     await http.json(
       "Google Sheets",
-      `${url}?fields=sheets(properties(sheetId,title),developerMetadata(metadataKey,metadataValue))`,
+      `${url}?fields=properties(timeZone,autoRecalc),sheets(properties(sheetId,title),developerMetadata(metadataKey,metadataValue))`,
       { headers },
     ),
   );
   if (!parsed.success)
     throw new SafeError("Google Sheets metadata has an unsupported shape.");
+  if (
+    tables.some((t) => t.relativeDates?.length) &&
+    !parsed.data.properties.timeZone
+  )
+    throw new SafeError(
+      "Google Sheets timezone is missing; cannot safely display relative last login. No changes were made.",
+    );
   const owned = (sheet: (typeof parsed.data.sheets)[number]) =>
     sheet.developerMetadata.some(
       (m) => m.metadataKey === marker && m.metadataValue === "managed",
@@ -606,6 +629,17 @@ export async function publishSheets(
   }
   const body = JSON.stringify({
     requests: [
+      ...(tables.some((t) => t.relativeDates?.length) &&
+      parsed.data.properties.autoRecalc === "ON_CHANGE"
+        ? [
+            {
+              updateSpreadsheetProperties: {
+                properties: { autoRecalc: "HOUR" },
+                fields: "autoRecalc",
+              },
+            },
+          ]
+        : []),
       ...(legacy
         ? [
             {
@@ -623,6 +657,7 @@ export async function publishSheets(
         tables,
         existingSheets.map((s) => s.properties),
         notes,
+        parsed.data.properties.timeZone ?? "UTC",
       ),
     ],
   });

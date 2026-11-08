@@ -52,8 +52,8 @@ test("omitted recipe lists retain the same tier's knowledge with its own timesta
   expect(current.rows[0]?.professionStatus).toBe("ok");
   expect(current.rows[0]?.professionFetchedAt).toBe(later.toISOString());
   const tables = buildTables(current);
-  expect(tables[1]?.rows[1]).toContain("Skills current; recipes retained");
-  expect(tables[0]?.rows[1]).toContain("Incomplete");
+  expect(tables[1]?.rows[1]).toContain("Incomplete");
+  expect(tables[0]?.rows[1]).toContain("Complete");
   expect(tables[2]?.rows[1]?.[2]).toContain(
     `[retained; last success: ${now.toISOString()}]`,
   );

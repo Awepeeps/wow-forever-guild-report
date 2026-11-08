@@ -182,7 +182,7 @@ test("large knower lists continue without truncation within Excel cell limits", 
   expect(chunks.join("\n").split("\n")).toHaveLength(2000);
 });
 
-test("character metrics preserve zero and unknown and do not claim XP is lifetime or last login is fetch time", () => {
+test("character metrics preserve zero, omit XP, and keep the exact last login hidden alongside the relative display", () => {
   const base = snapshot.rows[0];
   if (!base) throw new Error("fixture");
   const table = buildTables({
@@ -204,12 +204,13 @@ test("character metrics preserve zero and unknown and do not claim XP is lifetim
   if (!table) throw new Error("fixture");
   const cell = (header: string) =>
     table.rows[1]?.[table.rows[0]?.indexOf(header) ?? -1];
-  expect(cell("Equipped ilvl")).toBe(0);
+  expect(cell("iLvl")).toBe(0);
   expect(cell("Average ilvl")).toBe(12);
   expect(cell("Achievement Points")).toBe(0);
-  expect(cell("XP (API)")).toBe(0);
+  expect(table.rows[0]).not.toContain("XP (API)");
+  expect(cell("Last Login")).toBe("1 day ago");
   expect(cell("Last Login (UTC)")).toBe("2026-11-06T12:00:00.000Z");
-  expect(table.rows[0]?.indexOf("API Status")).toBe(
-    (table.rows[0]?.indexOf("Talent Points") ?? -1) + 1,
+  expect(table.rows[0]?.indexOf("Character API Status")).toBe(
+    (table.rows[0]?.indexOf("Last Login") ?? -1) + 1,
   );
 });

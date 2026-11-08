@@ -1,5 +1,10 @@
 import { strToU8, zipSync } from "fflate";
 import {
+  type RelativeDate,
+  relativeLogin,
+  validatedRelativeDates,
+} from "./dates.ts";
+import {
   armoryUrl,
   type PublicLink,
   recipeUrl,
@@ -14,6 +19,7 @@ import {
 import {
   classStyle,
   columnPresentation,
+  displayApiStatus,
   playerGroups,
   playerNotesHeader,
 } from "./presentation.ts";
@@ -24,6 +30,7 @@ export interface Table {
   name: string;
   rows: Cell[][];
   links?: PublicLink[];
+  relativeDates?: RelativeDate[];
 }
 
 export function buildTables(snapshot: Snapshot): Table[] {
@@ -31,17 +38,17 @@ export function buildTables(snapshot: Snapshot): Table[] {
     [
       "Discord",
       "Character Name",
+      "Guild Rank",
       "Class",
       "Level",
-      "Guild Rank",
-      "Equipped ilvl",
+      "Talent Points",
+      "Achievement Points",
+      "iLvl",
+      "Last Login",
+      "Character API Status",
+      playerNotesHeader,
       "Average ilvl",
       "Last Login (UTC)",
-      "Achievement Points",
-      "XP (API)",
-      "Talent Points",
-      "API Status",
-      playerNotesHeader,
       "Generated At",
       "Ruleset",
       "Faction",
@@ -81,48 +88,44 @@ export function buildTables(snapshot: Snapshot): Table[] {
   ];
   for (const row of sortRows([...snapshot.rows])) {
     const c = row.character;
-    const statuses = [
-      row.profileStatus,
-      row.professionStatus,
-      row.talentStatus,
-    ];
-    const professionStatus =
-      row.professionStatus === "ok"
-        ? hasRetainedRecipes(c)
-          ? "Skills current; recipes retained"
-          : "Complete"
-        : row.professionStatus === "manual"
-          ? "Manual"
-          : c.primary.length || c.secondary.length
-            ? `Retained (${row.professionStatus})`
-            : row.professionStatus === "unavailable"
-              ? "Unavailable"
-              : "Error";
+    const failed = (status: string) =>
+      status === "unavailable" || status === "error";
+    const characterRetained =
+      (failed(row.profileStatus) &&
+        (row.profileFetchedAt !== null ||
+          [c.class, c.race, c.faction, c.ruleset].some(Boolean) ||
+          [
+            c.equippedItemLevel,
+            c.averageItemLevel,
+            c.achievementPoints,
+            c.lastLoginAt,
+          ].some((v) => v !== undefined))) ||
+      (failed(row.talentStatus) &&
+        (row.talentFetchedAt !== null || c.talents.length > 0));
     characters.push([
       row.discord,
       c.name,
-      c.class,
-      c.level ?? "",
       c.guildRank === undefined
         ? ""
         : (snapshot.guildRankNames[String(c.guildRank)] ??
           `Rank ${c.guildRank} (unmapped)`),
-      c.equippedItemLevel ?? "",
-      c.averageItemLevel ?? "",
-      c.lastLoginAt ?? "",
-      c.achievementPoints ?? "",
-      c.experience ?? "",
+      c.class,
+      c.level ?? "",
       c.talents
         .map(
           (t) => `${t.group ? `Group ${t.group}: ` : ""}${t.tree} ${t.points}`,
         )
         .join(", "),
-      statuses.every((s) => s === "manual")
-        ? "Manual"
-        : statuses.every((s) => s === "ok") && !hasRetainedRecipes(c)
-          ? "Complete"
-          : "Incomplete",
+      c.achievementPoints ?? "",
+      c.equippedItemLevel ?? "",
+      c.lastLoginAt ? relativeLogin(c.lastLoginAt, snapshot.generatedAt) : "",
+      displayApiStatus(
+        [row.profileStatus, row.talentStatus],
+        characterRetained,
+      ),
       "",
+      c.averageItemLevel ?? "",
+      c.lastLoginAt ?? "",
       snapshot.generatedAt,
       c.ruleset,
       c.faction,
@@ -163,7 +166,12 @@ export function buildTables(snapshot: Snapshot): Table[] {
       c.class,
       describe(c.primary),
       describe(c.secondary),
-      professionStatus,
+      displayApiStatus(
+        [row.professionStatus],
+        hasRetainedRecipes(c) ||
+          (failed(row.professionStatus) &&
+            (c.primary.length > 0 || c.secondary.length > 0)),
+      ),
       "",
       snapshot.generatedAt,
       row.professionFetchedAt ?? "",
@@ -255,7 +263,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "API status",
-      "Incomplete means at least one API component failed or recipe knowledge was retained after an omitted recipe list; retained values may be older than this export. Unhide the individual statuses and last-success columns to identify which component is stale. Profession API Status labels retained data explicitly.",
+      "Character API Status covers profile/talents; Profession API Status covers professions/recipes. Both use Complete, Unavailable, Incomplete, Manual. Complete means all relevant requests succeeded. Unavailable means 404s with no retained detail; Incomplete means mixed/error responses or retained data, which may be older than this export. Unhide component statuses and last-success columns for details.",
     ],
     [
       "Identity",
@@ -292,7 +300,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Character metrics",
-      "Item levels, achievement points, XP and last login are API-reported profile values. Average ilvl is hidden by default; Equipped ilvl is visible. Blank means unknown; a successful profile omitting a metric clears it, while a failed profile retains prior values and last-success time. XP is the raw experience field, not inferred lifetime XP or progress to the next level. Last Login is Blizzard's timestamp in UTC, not this export's fetch time; it may lag.",
+      "iLvl is equipped item level; Average ilvl is hidden. Blank means unknown. A successful profile omitting a metric clears it; a failed profile retains prior values and last-success time. Sheets Last Login shows Today/1 day ago/N days ago with a trusted DATE/TODAY formula in the spreadsheet timezone; hourly-or-faster recalculation keeps the age current. The exact Blizzard UTC timestamp is hidden and can lag. XLSX/CSV Last Login (at export) is static at Generated At, using UTC calendar dates. Age recalculation does not fetch new Blizzard data.",
     ],
     [
       "Recipes",
@@ -300,7 +308,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Public links",
-      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open a Wowhead Forever name search: Blizzard recipe IDs are not Wowhead spell IDs, so an exact spell link cannot safely be inferred. Hidden URL columns keep link targets in CSV. Links use HTTPS on these two trusted hosts; no formulas or arbitrary API URLs are emitted.",
+      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open a Wowhead Forever name search: Blizzard recipe IDs are not Wowhead spell IDs, so an exact spell link cannot safely be inferred. Hidden URL columns keep link targets in CSV. Links use HTTPS on these two trusted hosts; hyperlink formulas and arbitrary API URLs are never emitted. Only Sheets Last Login uses the fixed generated relative-date formula; raw data stays literal.",
     ],
     [
       "Forever API research (community; US routes verified 2026-11-07)",
@@ -311,6 +319,18 @@ export function buildTables(snapshot: Snapshot): Table[] {
     {
       name: "Characters",
       rows: characters,
+      relativeDates: characters.slice(1).flatMap((row, i) => {
+        const timestamp = row[characters[0]?.indexOf("Last Login (UTC)") ?? -1];
+        return timestamp
+          ? [
+              {
+                row: i + 1,
+                column: characters[0]?.indexOf("Last Login") ?? -1,
+                timestamp: String(timestamp),
+              },
+            ]
+          : [];
+      }),
       links: characters
         .slice(1)
         .map((row, i) => ({ row: i + 1, column: 1, url: String(row.at(-1)) })),
@@ -390,8 +410,8 @@ function professionRowHeight(table: Table, row: Cell[]): number {
   return Math.min(409, Math.max(18, Math.max(...lines, 1) * 15 + 3));
 }
 
-// A small OOXML writer: inline strings avoid formulas. Explicit, validated
-// hyperlink relationships provide public drill-down without HYPERLINK formulas.
+// XLSX and CSV are snapshots at Generated At. Excel has no portable viewer-UTC
+// clock, so only Sheets uses the live-relative formula. XLSX text stays literal.
 export function toXlsx(tables: Table[]): Uint8Array {
   const classNames = [
     ...new Set(
@@ -440,6 +460,7 @@ export function toXlsx(tables: Table[]): Uint8Array {
     `<styleSheet xmlns="${ns}"><fonts count="${3 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}<font><u/><color rgb="FF0563C1"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="${4 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${5 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}<xf numFmtId="0" fontId="0" fillId="${3 + classStyles.length}" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>${[0, 3 + classStyles.length].map((fill) => `<xf numFmtId="0" fontId="${2 + classStyles.length}" fillId="${fill}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
   );
   tables.forEach((table, i) => {
+    validatedRelativeDates(table);
     const links = validatedLinks(table.rows, table.links);
     const linkCells = new Set(
       links.map((link) => `${link.row}:${link.column}`),
@@ -464,6 +485,10 @@ export function toXlsx(tables: Table[]): Uint8Array {
         (row, r) =>
           `<row r="${r + 1}"${r === 0 ? ' ht="32" customHeight="1"' : ["Professions", "Recipes"].includes(table.name) ? ` ht="${professionRowHeight(table, row)}" customHeight="1"` : ""}>${row
             .map((cell, c) => {
+              const output =
+                r === 0 && table.name === "Characters" && cell === "Last Login"
+                  ? "Last Login (at export)"
+                  : cell;
               const colorIndex =
                 c === classColumn
                   ? classNames.indexOf(String(cell).trim().toLowerCase())
@@ -478,7 +503,7 @@ export function toXlsx(tables: Table[]): Uint8Array {
                       : colorIndex < 0
                         ? 0
                         : colorIndex + 2;
-              return `<c r="${column(c)}${r + 1}" s="${style}" t="${typeof cell === "number" ? "n" : "inlineStr"}">${typeof cell === "number" ? `<v>${cell}</v>` : `<is><t xml:space="preserve">${xml(cell)}</t></is>`}</c>`;
+              return `<c r="${column(c)}${r + 1}" s="${style}" t="${typeof output === "number" ? "n" : "inlineStr"}">${typeof output === "number" ? `<v>${output}</v>` : `<is><t xml:space="preserve">${xml(output)}</t></is>`}</c>`;
             })
             .join("")}</row>`,
       )

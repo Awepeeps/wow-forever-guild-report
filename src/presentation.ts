@@ -14,6 +14,24 @@ const classColors: Record<string, string> = {
   evoker: "33937F",
 };
 
+export type DisplayApiStatus =
+  | "Complete"
+  | "Unavailable"
+  | "Incomplete"
+  | "Manual";
+export function displayApiStatus(
+  statuses: readonly ("manual" | "ok" | "unavailable" | "error")[],
+  retained = false,
+): DisplayApiStatus {
+  if (statuses.length && statuses.every((s) => s === "manual")) return "Manual";
+  if (retained) return "Incomplete";
+  if (statuses.length && statuses.every((s) => s === "unavailable"))
+    return "Unavailable";
+  return statuses.length && statuses.every((s) => s === "ok") && !retained
+    ? "Complete"
+    : "Incomplete";
+}
+
 export const playerNotesHeader = "Player Notes (Editable)";
 export function isPlayerNotesHeader(header: unknown): boolean {
   return header === playerNotesHeader || header === "Notes";
@@ -84,6 +102,7 @@ export function columnPresentation(
     "Recipe URL",
     "Armory URL",
     "Average ilvl",
+    "Last Login (UTC)",
   ]);
   const hidden =
     technical.has(header) ||
@@ -94,13 +113,12 @@ export function columnPresentation(
     Class: 100,
     Level: 75,
     "Guild Rank": 110,
-    "Equipped ilvl": 90,
-    "Last Login (UTC)": 180,
+    iLvl: 85,
+    "Last Login": 110,
     "Achievement Points": 110,
-    "XP (API)": 100,
     "Talent Points": 190,
     [playerNotesHeader]: 200,
-    "API Status": 110,
+    "Character API Status": 120,
     "Generated At": 165,
     "Primary Professions": 230,
     "Secondary Professions": 250,

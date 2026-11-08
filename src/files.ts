@@ -58,7 +58,15 @@ export async function writeExports(
   for (const table of tables)
     await atomicWrite(
       join(directory, `${table.name.toLowerCase().replaceAll(" ", "-")}.csv`),
-      toCsv(table.rows),
+      toCsv(
+        table.rows.map((row, i) =>
+          i === 0 && table.name === "Characters"
+            ? row.map((cell) =>
+                cell === "Last Login" ? "Last Login (at export)" : cell,
+              )
+            : row,
+        ),
+      ),
     );
   await atomicWrite(join(directory, "roster.xlsx"), toXlsx(tables));
   await atomicWrite(
