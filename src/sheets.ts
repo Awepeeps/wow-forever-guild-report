@@ -16,7 +16,13 @@ import {
   rgb,
   toneStyles,
 } from "./presentation.ts";
-import { marginHeader, type Table, validatedTones } from "./workbook.ts";
+import {
+  marginHeader,
+  moneyHeaders,
+  type Table,
+  validatedMoney,
+  validatedTones,
+} from "./workbook.ts";
 
 const serviceAccountSchema = z.object({
   client_email: z.email(),
@@ -480,6 +486,36 @@ export function sheetRequests(
               };
             }),
             fields: "userEnteredFormat",
+          },
+        });
+      }
+      // Price cells hold raw copper so sorting is numeric; a per-cell number
+      // format shows coins. Runs after the whole-format rewrites above, and
+      // sets every row of each money column so no stale pattern survives.
+      const money = new Map(
+        validatedMoney(table).map((m) => [`${m.row}:${m.column}`, m.pattern]),
+      );
+      for (const header of moneyHeaders) {
+        const column = table.rows[0]?.indexOf(header) ?? -1;
+        if (column < 0) continue;
+        requests.push({
+          updateCells: {
+            start: { sheetId: id, rowIndex: 1, columnIndex: column },
+            rows: table.rows.slice(1).map((_, i) => {
+              const pattern = money.get(`${i + 1}:${column}`);
+              return {
+                values: [
+                  pattern
+                    ? {
+                        userEnteredFormat: {
+                          numberFormat: { type: "NUMBER", pattern },
+                        },
+                      }
+                    : {},
+                ],
+              };
+            }),
+            fields: "userEnteredFormat.numberFormat",
           },
         });
       }
