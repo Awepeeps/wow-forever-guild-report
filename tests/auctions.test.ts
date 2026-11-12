@@ -241,6 +241,23 @@ test("price refresh retains only recipe items, clears successful missing listing
   expect(recipePrices(missing, details).materialCost).toBe(
     "Missing buyout prices",
   );
+  // Unknown price cells are blank, so AH Data must say why each is unknown.
+  expect(recipePrices(missing, details).status).toMatch(
+    /; output: no buyout listings; materials: missing buyout prices$/,
+  );
+  const missingRecipes = buildTables(missing).find((t) => t.name === "Recipes");
+  const missingValue = (header: string) =>
+    missingRecipes?.rows[1]?.[missingRecipes.rows[0]?.indexOf(header) ?? -1];
+  for (const header of [
+    "Output AH / Item",
+    "Materials AH / Craft",
+    "AH Margin / Craft",
+  ])
+    expect(missingValue(header)).toBe("");
+  expect(missingValue("Output Listed")).toBe(0);
+  expect(String(missingValue("AH Data"))).toContain(
+    "output: no buyout listings",
+  );
   const { auctionMarket: _market, ...disabled } = input();
   const next = await refreshAuctionPrices(disabled, source, current, now);
   expect(next.auctionPrices).toBeUndefined();
@@ -544,6 +561,15 @@ test("margin per craft uses the yield range, colors only an unambiguous gain or 
   });
   expect(recipePrices(even, fixed).margin).toBe("±0c");
   expect(recipePrices(even, fixed).tone).toBeUndefined();
+  // A half-copper loss displays as −1c (half away from zero) and is colored as one.
+  const halfLoss = priced({
+    "7001": { unitCopper: 73.5, quantity: 8 },
+    "7002": { unitCopper: 37, quantity: 25 },
+  });
+  expect(recipePrices(halfLoss, fixed)).toMatchObject({
+    margin: "−1c",
+    tone: "loss",
+  });
   // A range crossing zero keeps its sign in text but is not colored.
   const mixed = priced({
     "7001": { unitCopper: 50, quantity: 8 },
@@ -753,10 +779,21 @@ test("Sheets writes raw copper with a coin number format and clears stale format
     type: "NUMBER",
     pattern: '"+"0"s "00"c"" to +29s 26c";"−"0"s "00"c"" to +29s 26c"',
   });
-  // Unknown prices stay text and get an explicit empty format, clearing old patterns.
+  // Unknown prices are truly blank cells (no value at all, so they sort last in
+  // either direction) and get an explicit empty format, clearing old patterns.
   const unknown = buildTables({ ...current, auctionPrices: undefined });
   const unknownRecipes = unknown.find((t) => t.name === "Recipes");
-  expect(unknownRecipes?.rows[1]?.[outputColumn]).toBe("Unknown");
+  expect(unknownRecipes?.rows[1]?.[outputColumn]).toBe("");
+  const blank = (sheetRequests(unknown, []) as typeof requests).find(
+    (r) =>
+      r.updateCells?.fields === "userEnteredValue,textFormatRuns" &&
+      r.updateCells.rows[0]?.values.some(
+        (v) =>
+          JSON.stringify(v.userEnteredValue) ===
+          JSON.stringify({ stringValue: "Output AH / Item" }),
+      ),
+  )?.updateCells;
+  expect(blank?.rows[1]?.values[outputColumn]).toEqual({});
   const cleared = (sheetRequests(unknown, []) as typeof requests).find(
     (r) =>
       r.updateCells?.start?.columnIndex === outputColumn &&

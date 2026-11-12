@@ -370,14 +370,23 @@ export function sheetRequests(
         },
         rows: table.rows.map((row, r) => ({
           values: row.map((cell, c) => ({
-            userEnteredValue:
-              r > 0 && c === noteColumn
-                ? (noteFor(row)?.userEnteredValue ?? { stringValue: "" })
-                : dates.has(`${r}:${c}`)
-                  ? { formulaValue: `=${dates.get(`${r}:${c}`)}` }
-                  : typeof cell === "number"
-                    ? { numberValue: cell }
-                    : { stringValue: cell },
+            // An empty generated cell omits its value; the field mask still
+            // clears it, leaving a truly blank cell that sorts last both ways.
+            ...(r > 0 &&
+            c !== noteColumn &&
+            cell === "" &&
+            !dates.has(`${r}:${c}`)
+              ? {}
+              : {
+                  userEnteredValue:
+                    r > 0 && c === noteColumn
+                      ? (noteFor(row)?.userEnteredValue ?? { stringValue: "" })
+                      : dates.has(`${r}:${c}`)
+                        ? { formulaValue: `=${dates.get(`${r}:${c}`)}` }
+                        : typeof cell === "number"
+                          ? { numberValue: cell }
+                          : { stringValue: cell },
+                }),
             ...(r > 0 && c === noteColumn && noteFor(row)?.textFormatRuns
               ? { textFormatRuns: noteFor(row)?.textFormatRuns }
               : {}),

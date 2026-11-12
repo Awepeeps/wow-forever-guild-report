@@ -365,9 +365,8 @@ export function buildTables(snapshot: Snapshot): Table[] {
         chunk,
         recipeDetailStatus(details),
         status,
-        !snapshot.auctionMarket
-          ? "Not configured"
-          : (prices.outputCopper ?? prices.output),
+        // Blank, never text, so unknowns sort last; AH Data says why.
+        prices.outputCopper ?? "",
         prices.outputQuantity ?? "",
         hyjal
           ? "View on Hyjal"
@@ -376,12 +375,8 @@ export function buildTables(snapshot: Snapshot): Table[] {
             : output
               ? "No Hyjal market"
               : "Output unknown",
-        !snapshot.auctionMarket
-          ? "Not configured"
-          : (prices.materialCopper ?? prices.materialCost),
-        !snapshot.auctionMarket
-          ? "Not configured"
-          : (prices.marginCopper ?? prices.margin),
+        prices.materialCopper ?? "",
+        prices.marginCopper ?? "",
         prices.status,
         auctionSnapshotAt(snapshot) ??
           (snapshot.auctionMarket ? "Not provided" : ""),
@@ -598,7 +593,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Auction prices",
-      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; Output Listed is the buyout quantity listed. Output AH / Item, Materials AH / Craft and AH Margin / Craft store raw copper numbers shown as coins by a number format, so they sort and filter by value; a margin range sorts by its low end. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield, less the configured auction house cut (see AH Margin Basis on Guild Info), minus Materials AH / Craft; a range for variable yields. Listing deposits are excluded because they are refunded on sale but lost if the auction expires. It is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times and fetch diagnostics are hidden/available in CSV; CSV has no number formats, so its price columns carry the coin text and the hidden copper columns carry the numbers. Item-ID matching does not distinguish random bonuses. Hyjal AH opens the crafted item's page on hyjal.cc, an independent third-party auction browser, for the same region, ruleset and faction market; its listings may be refreshed on a different schedule than this export.",
+      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; Output Listed is the buyout quantity listed. Output AH / Item, Materials AH / Craft and AH Margin / Craft store raw copper numbers shown as coins by a number format, so they sort and filter by value; a margin range sorts by its low end. An unknown price leaves its cell blank, so it sorts last in either direction, and AH Data states why (for example output: no buyout listings; materials: insufficient listings). Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield, less the configured auction house cut (see AH Margin Basis on Guild Info), minus Materials AH / Craft; a range for variable yields. Listing deposits are excluded because they are refunded on sale but lost if the auction expires. It is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times and fetch diagnostics are hidden/available in CSV; CSV has no number formats, so its price columns carry the coin text and the hidden copper columns carry the numbers. Item-ID matching does not distinguish random bonuses. Hyjal AH opens the crafted item's page on hyjal.cc, an independent third-party auction browser, for the same region, ruleset and faction market; its listings may be refreshed on a different schedule than this export.",
     ],
     [
       "Public links",

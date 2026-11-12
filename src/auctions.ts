@@ -243,15 +243,32 @@ export function recipePrices(
       marginCopper = low;
       marginHighCopper = high;
       margin = moneyDisplay(low, { signed: true, upperCopper: high }).text;
-      tone =
-        Math.round(low) > 0
-          ? "gain"
-          : Math.round(high) < 0
-            ? "loss"
-            : undefined;
+      // Round as the displayed whole copper does (half away from zero), so a
+      // margin shown as −1c is never left uncolored.
+      const shown = (copper: number) =>
+        Math.sign(copper) * Math.round(Math.abs(copper));
+      tone = shown(low) > 0 ? "gain" : shown(high) < 0 ? "loss" : undefined;
     }
   }
-  const incomplete = !output || materialCopper === undefined;
+  // Unknown price cells are left blank so they sort last in either direction;
+  // the reason each is unknown is spelled out in the AH Data status instead.
+  const reasons: string[] = [];
+  if (data) {
+    if (!output)
+      reasons.push(
+        details?.output ? "output: no buyout listings" : "output: item unknown",
+      );
+    if (materialCopper === undefined)
+      reasons.push(
+        details?.reagents === undefined
+          ? "materials: unknown"
+          : `materials: ${materialCost.toLowerCase()}`,
+      );
+    if (output && materialCopper !== undefined && marginCopper === undefined)
+      reasons.push(
+        details?.quantity ? "margin: out of range" : "margin: yield unknown",
+      );
+  }
   const status = auctionStatus(snapshot);
   return {
     output: output
@@ -269,7 +286,7 @@ export function recipePrices(
     ...(marginCopper !== undefined ? { marginCopper } : {}),
     ...(marginHighCopper !== undefined ? { marginHighCopper } : {}),
     ...(tone ? { tone } : {}),
-    status: data && incomplete ? `${status}; some prices unavailable` : status,
+    status: reasons.length ? `${status}; ${reasons.join("; ")}` : status,
   };
 }
 
