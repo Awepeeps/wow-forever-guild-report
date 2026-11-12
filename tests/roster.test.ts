@@ -493,7 +493,7 @@ describe("guild roster refresh", () => {
     const empty = await refreshRoster(guildConfig, {}, source(), now, snapshot);
     expect(empty.rows).toHaveLength(0);
   });
-  test("character 403 retains the affected component while guild 403 and OAuth 403 abort", async () => {
+  test("character 403 keeps configured values for the affected component while guild 403 and OAuth 403 abort", async () => {
     const forbidden = async (): Promise<never> => {
       throw new ApiError("Blizzard API", 403);
     };
@@ -663,4 +663,119 @@ test("rank labels validate at config boundaries, survive snapshots, and ranks co
     "0": "Guild Master",
     "1": "Officer",
   });
+});
+
+test("clearing honours only the config entry merged into that character, never a reused slug", async () => {
+  const unavailable = async (): Promise<never> => {
+    throw new ApiError("Blizzard API", 404);
+  };
+  const renamed = characterSchema.parse({
+    slug: "jaina",
+    name: "Jaina",
+    id: "123",
+  });
+  const reused = characterSchema.parse({
+    slug: "thrall",
+    name: "Thrall",
+    id: "456",
+  });
+  const input = configSchema.parse({
+    ...config,
+    characters: [
+      {
+        slug: "thrall",
+        name: "Thrall",
+        id: "123",
+        primary: [{ name: "Alchemy", skill: 50, max: 75 }],
+        equippedItemLevel: 9,
+      },
+    ],
+  });
+  const guild = async () => [renamed, reused];
+  const prior = await refreshRoster(input, {}, source({ guild }), now);
+  const result = await refreshRoster(
+    input,
+    {},
+    source({
+      guild,
+      profile: unavailable,
+      professions: unavailable,
+      talents: unavailable,
+    }),
+    new Date(now.getTime() + 60_000),
+    prior,
+  );
+  const row = (id: string) => result.rows.find((r) => r.character.id === id);
+  expect(row("123")?.character.primary).toEqual([
+    { name: "Alchemy", skill: 50, max: 75 },
+  ]);
+  expect(row("123")?.character.equippedItemLevel).toBe(9);
+  expect(row("123")?.character.talents).toEqual([]);
+  expect(row("123")?.issue).toContain("configured values kept");
+  expect(row("123")?.issue).toMatch(/talents: [^.]*earlier refreshes\. /);
+  expect(
+    prior.rows.find((r) => r.character.id === "456")?.character.primary.length,
+  ).toBeGreaterThan(0);
+  expect(row("456")?.character.primary).toEqual([]);
+  expect(row("456")?.character.talents).toEqual([]);
+  expect(row("456")?.issue).not.toContain("configured values kept");
+});
+
+test("a character 403/5xx without an override clears its component but keeps discovery and market fields", async () => {
+  const member = characterSchema.parse({
+    slug: "example-priest",
+    name: "Example Priest",
+    id: "1",
+    guildRank: 2,
+    level: 20,
+    class: "Priest",
+  });
+  const input = configSchema.parse({ ...config, characters: [] });
+  const prior = await refreshRoster(
+    input,
+    {},
+    source({
+      guild: async () => [member],
+      profile: async () => ({
+        ruleset: "Roleplay",
+        faction: "Alliance",
+        race: "Human",
+        equippedItemLevel: 14,
+        lastLoginAt: "2026-11-06T12:00:00.000Z",
+      }),
+    }),
+    now,
+  );
+  for (const status of [403, 500]) {
+    const failing = async (): Promise<never> => {
+      throw new ApiError("Blizzard API", status);
+    };
+    const result = await refreshRoster(
+      input,
+      {},
+      source({
+        guild: async () => [member],
+        profile: failing,
+        professions: failing,
+        talents: failing,
+      }),
+      new Date(now.getTime() + 60_000),
+      prior,
+    );
+    const c = result.rows[0]?.character;
+    expect(c).toMatchObject({
+      ruleset: "Roleplay",
+      faction: "Alliance",
+      race: "Human",
+      level: 20,
+      class: "Priest",
+      guildRank: 2,
+      primary: [],
+      secondary: [],
+      talents: [],
+    });
+    expect(c?.equippedItemLevel).toBeUndefined();
+    expect(c?.lastLoginAt).toBeUndefined();
+    expect(result.rows[0]?.profileFetchedAt).toBe(now.toISOString());
+  }
 });

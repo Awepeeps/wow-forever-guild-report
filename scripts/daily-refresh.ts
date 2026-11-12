@@ -90,7 +90,7 @@ export async function dailyRefresh({
     );
   await unlink(pending);
   console.log(
-    `Daily refresh published ${current.rows.length} characters; generated ${current.generatedAt}; ${code === 2 ? "partial API data (retained values labelled)" : "complete API data"}.`,
+    `Daily refresh published ${current.rows.length} characters; generated ${current.generatedAt}; ${code === 2 ? "partial API data (failed components labelled)" : "complete API data"}.`,
   );
   return code;
 }

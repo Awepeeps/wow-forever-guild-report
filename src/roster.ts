@@ -46,11 +46,13 @@ function clearComponent(
   character: Character,
   component: keyof typeof componentFields,
   supplied: object | undefined,
-): Character {
+): { character: Character; kept: boolean } {
   const cleared: Record<string, unknown> = { ...character };
+  let kept = false;
   for (const field of componentFields[component])
-    if (!supplied || !Object.hasOwn(supplied, field)) delete cleared[field];
-  return characterSchema.parse(cleared);
+    if (supplied && Object.hasOwn(supplied, field)) kept = true;
+    else delete cleared[field];
+  return { character: characterSchema.parse(cleared), kept };
 }
 
 function refreshRecipeKnowledge(
@@ -136,6 +138,9 @@ export async function refreshRoster(
       : undefined;
   };
   const characters = new Map<string, Character>();
+  // The config entry actually merged into each roster key, so clearing honours
+  // exactly that entry's supplied fields (never a stale slug match).
+  const overrides = new Map<string, RosterConfig["characters"][number]>();
   // A guild roster failure aborts the run; never silently replace it with an empty roster.
   const members = config.guild ? await source.guild(config.guild) : [];
   if (duplicateCharacterIndices(members).length)
@@ -173,6 +178,7 @@ export async function refreshRoster(
       throw new SafeError(
         "Explicit character ID conflicts with guild discovery. Reconcile the private config before refreshing.",
       );
+    overrides.set(key, c);
     characters.set(
       key,
       characterSchema.parse({
@@ -192,16 +198,11 @@ export async function refreshRoster(
     );
   const fetchedAt = now.toISOString();
   const rows = await mapConcurrent(
-    [...characters.values()],
+    [...characters.entries()],
     4,
-    async (original): Promise<RosterRow> => {
+    async ([key, original]): Promise<RosterRow> => {
       let character = original;
-      const supplied = config.characters.find(
-        (c) =>
-          (c.id !== undefined && c.id === original.id) ||
-          c.slug.toLocaleLowerCase("en-US") ===
-            original.slug.toLocaleLowerCase("en-US"),
-      );
+      const supplied = overrides.get(key);
       const prior = priorFor(original);
       const row: RosterRow = {
         character,
@@ -265,12 +266,13 @@ export async function refreshRoster(
           if (component === "profile") row.profileStatus = status;
           else if (component === "professions") row.professionStatus = status;
           else row.talentStatus = status;
-          character = clearComponent(character, component, supplied);
+          const cleared = clearComponent(character, component, supplied);
+          character = cleared.character;
           const detail =
             status === "unavailable"
               ? "HTTP 404; profile may be unpublished, below level 10, or temporarily unavailable"
               : "request or response validation failed";
-          row.issue += `${component}: ${detail}; cleared values from earlier refreshes${supplied ? " (configured values kept)" : ""}. `;
+          row.issue += `${component}: ${detail}; cleared values from earlier refreshes${cleared.kept ? " (configured values kept)" : ""}. `;
         }
       }
       row.character = character;

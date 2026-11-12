@@ -136,19 +136,17 @@ export function buildTables(snapshot: Snapshot): Table[] {
     const c = row.character;
     const failed = (status: string) =>
       status === "unavailable" || status === "error";
+    // Failed components are cleared at refresh, so only configured values
+    // remain; discovery fields (class, level, rank) are not profile detail.
     const characterRetained =
       (failed(row.profileStatus) &&
-        (row.profileFetchedAt !== null ||
-          [c.class, c.race, c.faction, c.ruleset].some(Boolean) ||
-          [
-            c.level,
-            c.equippedItemLevel,
-            c.averageItemLevel,
-            c.achievementPoints,
-            c.lastLoginAt,
-          ].some((v) => v !== undefined))) ||
-      (failed(row.talentStatus) &&
-        (row.talentFetchedAt !== null || c.talents.length > 0));
+        [
+          c.equippedItemLevel,
+          c.averageItemLevel,
+          c.achievementPoints,
+          c.lastLoginAt,
+        ].some((v) => v !== undefined)) ||
+      (failed(row.talentStatus) && c.talents.length > 0);
     characters.push([
       row.discord,
       c.name,
