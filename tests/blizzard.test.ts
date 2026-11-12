@@ -418,3 +418,29 @@ test("recipe details use original IDs on the static Forever route, validate quan
   expect(urls).toHaveLength(count);
   expect(urls.some((url) => url.includes("untrusted.invalid"))).toBe(false);
 });
+
+test("vendor sell prices come from the static Forever item route and validate identity and shape", async () => {
+  let response: unknown = { id: 7001, name: "Invented Tonic", sell_price: 29 };
+  const client = new BlizzardClient(
+    { region: "us", locale: "en_US" },
+    { clientId: "test", clientSecret: "test" },
+    new HttpClient(async (input) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith("/token"))
+        return Response.json({ access_token: "test-token", expires_in: 3600 });
+      expect(url.pathname).toBe("/data/wow/item/7001");
+      expect(url.searchParams.get("namespace")).toBe("static-forever-us");
+      return Response.json(response);
+    }),
+  );
+  expect(await client.itemVendor(7001)).toEqual({ id: 7001, sellCopper: 29 });
+  response = { id: 7001, sell_price: 0 };
+  expect(await client.itemVendor(7001)).toEqual({ id: 7001, sellCopper: 0 });
+  // Missing sell_price is unknown, not zero.
+  response = { id: 7001 };
+  expect(await client.itemVendor(7001)).toEqual({ id: 7001 });
+  response = { id: 7002, sell_price: 29 };
+  await expect(client.itemVendor(7001)).rejects.toThrow("identity");
+  response = { id: 7001, sell_price: -5 };
+  await expect(client.itemVendor(7001)).rejects.toThrow("unsupported shape");
+});

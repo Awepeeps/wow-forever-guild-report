@@ -52,6 +52,12 @@ import { knowerChunks, knownRecipes, recipeCoverage } from "./recipes.ts";
 
 export type Cell = string | number;
 export const marginHeader = "AH Margin / Craft";
+export const vendorMarginHeader = "Vendor Margin / Craft";
+/** Signed per-craft margins: colored gain/loss and shown with a sign. */
+export const marginHeaders: readonly string[] = [
+  marginHeader,
+  vendorMarginHeader,
+];
 export const hyjalHeader = "Hyjal AH";
 export const outputPriceHeader = "Output AH / Item";
 export const materialsPriceHeader = "Materials AH / Craft";
@@ -61,6 +67,7 @@ export const moneyHeaders: readonly string[] = [
   outputPriceHeader,
   materialsPriceHeader,
   marginHeader,
+  vendorMarginHeader,
 ];
 /**
  * A numeric copper cell shown as coins. The renderer derives the pattern from
@@ -262,8 +269,8 @@ export function buildTables(snapshot: Snapshot): Table[] {
   const craftedItemLinks: PublicLink[] = [];
   const recipes: Cell[][] = [
     [
-      "Profession",
       "Recipe",
+      "Profession",
       "Makes",
       "Materials per Craft",
       "Known By",
@@ -274,6 +281,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       hyjalHeader,
       materialsPriceHeader,
       marginHeader,
+      vendorMarginHeader,
       "AH Data",
       "AH Snapshot (UTC)",
       "Recipe ID",
@@ -290,6 +298,9 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Output AH Copper",
       "Materials AH Copper",
       "AH Margin Copper",
+      "Output Vendor Copper",
+      "Vendor Margin Copper",
+      "Vendor Price Last Success",
       "Auction House ID",
       "Auction Last Success",
       "Auction Last Attempt",
@@ -310,13 +321,27 @@ export function buildTables(snapshot: Snapshot): Table[] {
         : "Current reports";
     for (const chunk of knowerChunks(recipe.knowers)) {
       const row = recipes.length;
+      const header = recipes[0] ?? [];
       if (prices.tone)
         recipeTones.push({
           row,
-          column: recipes[0]?.indexOf(marginHeader) ?? -1,
+          column: header.indexOf(marginHeader),
           tone: prices.tone,
         });
-      const header = recipes[0] ?? [];
+      if (prices.vendorTone)
+        recipeTones.push({
+          row,
+          column: header.indexOf(vendorMarginHeader),
+          tone: prices.vendorTone,
+        });
+      if (prices.vendorMarginCopper !== undefined)
+        recipeMoney.push({
+          row,
+          column: header.indexOf(vendorMarginHeader),
+          ...(prices.vendorMarginHighCopper !== undefined
+            ? { upperCopper: prices.vendorMarginHighCopper }
+            : {}),
+        });
       if (snapshot.auctionMarket) {
         if (prices.outputCopper !== undefined)
           recipeMoney.push({
@@ -358,8 +383,8 @@ export function buildTables(snapshot: Snapshot): Table[] {
       if (materials.length)
         recipeItemLists.push({ row, column: 3, items: materials });
       recipes.push([
-        recipe.profession,
         recipe.name,
+        recipe.profession,
         craftingOutput(details?.data),
         materials.length
           ? materials.map((item) => item.text).join("\n")
@@ -379,6 +404,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
               : "Output unknown",
         prices.materialCopper ?? "",
         prices.marginCopper ?? "",
+        prices.vendorMarginCopper ?? "",
         prices.status,
         auctionSnapshotAt(snapshot) ??
           (snapshot.auctionMarket ? "Not provided" : ""),
@@ -396,6 +422,9 @@ export function buildTables(snapshot: Snapshot): Table[] {
         prices.outputCopper ?? "",
         prices.materialCopper ?? "",
         prices.marginCopper ?? "",
+        prices.vendorCopper ?? "",
+        prices.vendorMarginCopper ?? "",
+        (output && snapshot.itemVendor?.[String(output.id)]?.fetchedAt) ?? "",
         snapshot.auctionMarket?.houseId ?? "",
         snapshot.auctionPrices?.fetchedAt ?? "",
         snapshot.auctionPrices?.attemptedAt ?? "",
@@ -474,6 +503,14 @@ export function buildTables(snapshot: Snapshot): Table[] {
           ? "Before the auction house cut (no sale cut configured)"
           : `After a ${snapshot.auctionMarket.saleCutPercent}% auction house cut; deposits excluded (refunded on sale)`
         : "Not configured",
+    ],
+    [
+      "Vendor Margin Basis",
+      "Output vendor sell price × reported yield, minus Materials AH / Craft; no auction cut or deposit",
+    ],
+    [
+      "Vendor Prices (known / crafted items)",
+      `${Object.values(snapshot.itemVendor ?? {}).filter((e) => e.data?.sellCopper !== undefined).length} / ${new Set(Object.values(snapshot.recipeDetails ?? {}).flatMap((e) => (e.data?.output ? [e.data.output.id] : []))).size}`,
     ],
     ["AH Snapshot (UTC)", auctionSnapshotAt(snapshot) ?? "Not provided"],
     ["Auction Fetch Last Success", snapshot.auctionPrices?.fetchedAt ?? ""],
@@ -589,7 +626,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Recipes",
-      "Recipes lists profession, recipe and known characters (with Discord), sorted by profession then recipe. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests remove that character's recipe knowledge until a later refresh succeeds. Successful responses omitting recipe lists retain only the same profession/tier knowledge and its original recipe-specific timestamp; explicit empty lists clear it. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
+      "Recipes lists recipe, profession and known characters (with Discord), sorted by profession then recipe; the Recipe column stays frozen while scrolling right. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests remove that character's recipe knowledge until a later refresh succeeds. Successful responses omitting recipe lists retain only the same profession/tier knowledge and its original recipe-specific timestamp; explicit empty lists clear it. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
     ],
     [
       "Recipe materials and output",
@@ -601,7 +638,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Auction prices",
-      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; Output Listed is the buyout quantity listed. Output AH / Item, Materials AH / Craft and AH Margin / Craft store raw copper numbers shown as coins by a number format, so they sort and filter by value; a margin range sorts by its low end. An unknown price leaves its cell blank, so it sorts last in either direction, and AH Data states why (for example output: no buyout listings; materials: insufficient listings). Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield, less the configured auction house cut (see AH Margin Basis on Guild Info), minus Materials AH / Craft; a range for variable yields. Listing deposits are excluded because they are refunded on sale but lost if the auction expires. It is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times and fetch diagnostics are hidden/available in CSV; CSV has no number formats, so its price columns carry the coin text and the hidden copper columns carry the numbers. Item-ID matching does not distinguish random bonuses. Hyjal AH opens the crafted item's page on hyjal.cc, an independent third-party auction browser, for the same region, ruleset and faction market; its listings may be refreshed on a different schedule than this export.",
+      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; Output Listed is the buyout quantity listed. Output AH / Item, Materials AH / Craft and AH Margin / Craft store raw copper numbers shown as coins by a number format, so they sort and filter by value; a margin range sorts by its low end. An unknown price leaves its cell blank, so it sorts last in either direction, and AH Data states why (for example output: no buyout listings; materials: insufficient listings). Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield, less the configured auction house cut (see AH Margin Basis on Guild Info), minus Materials AH / Craft; a range for variable yields. Listing deposits are excluded because they are refunded on sale but lost if the auction expires. It is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted for missing listings. Vendor Margin / Craft is a separate comparison: the crafted item's vendor sell price from Blizzard's static Forever item API × reported yield, minus the same Materials AH / Craft, with no auction cut or deposit; it is blank when either side is unknown or the item has no vendor sell price, with the reason in AH Data. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times and fetch diagnostics are hidden/available in CSV; CSV has no number formats, so its price columns carry the coin text and the hidden copper columns carry the numbers. Item-ID matching does not distinguish random bonuses. Hyjal AH opens the crafted item's page on hyjal.cc, an independent third-party auction browser, for the same region, ruleset and faction market; its listings may be refreshed on a different schedule than this export.",
     ],
     [
       "Public links",
@@ -644,7 +681,15 @@ export function buildTables(snapshot: Snapshot): Table[] {
       links: [
         ...recipes.slice(1).flatMap((row, i) => {
           const url = row[recipes[0]?.indexOf("Recipe URL") ?? -1];
-          return url ? [{ row: i + 1, column: 1, url: String(url) }] : [];
+          return url
+            ? [
+                {
+                  row: i + 1,
+                  column: recipes[0]?.indexOf("Recipe") ?? -1,
+                  url: String(url),
+                },
+              ]
+            : [];
         }),
         ...craftedItemLinks,
       ],
@@ -824,15 +869,16 @@ function xlsxItemColumns(table: Table): Table {
   };
 }
 
-/** Tones only ever mark the generated margin column of data rows. */
+/** Tones only ever mark the generated margin columns of data rows. */
 export function validatedTones(table: Table): CellTone[] {
-  const column = table.rows[0]?.indexOf(marginHeader) ?? -1;
+  const columns = new Set(
+    marginHeaders
+      .map((header) => table.rows[0]?.indexOf(header) ?? -1)
+      .filter((column) => column >= 0),
+  );
   return (table.tones ?? []).filter(
     (tone) =>
-      tone.column === column &&
-      column >= 0 &&
-      tone.row >= 1 &&
-      tone.row < table.rows.length,
+      columns.has(tone.column) && tone.row >= 1 && tone.row < table.rows.length,
   );
 }
 
@@ -852,7 +898,7 @@ export function validatedMoney(table: Table): (MoneyCell & MoneyDisplay)[] {
       typeof value !== "number"
     )
       return [];
-    const signed = name === marginHeader;
+    const signed = marginHeaders.includes(name);
     if (!signed && cell.upperCopper !== undefined) return [];
     return [
       {
@@ -981,7 +1027,12 @@ export function toXlsx(tables: Table[]): Uint8Array {
     const toneCells = new Map(
       validatedTones(table).map((t) => [`${t.row}:${t.column}`, t.tone]),
     );
-    const frozen = ["Characters", "Professions"].includes(table.name);
+    // Roster tabs keep Discord + character visible; Recipes keeps the recipe.
+    const frozenColumns = ["Characters", "Professions"].includes(table.name)
+      ? 2
+      : table.name === "Recipes"
+        ? 1
+        : 0;
     const shadedRows = new Set<number>();
     if (table.name === "Professions")
       for (const group of playerGroups(table.rows)) {
@@ -1026,7 +1077,7 @@ export function toXlsx(tables: Table[]): Uint8Array {
       .join("");
     add(
       `xl/worksheets/sheet${i + 1}.xml`,
-      `<worksheet xmlns="${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><dimension ref="A1:${last}"/><sheetViews><sheetView workbookViewId="0"><pane ${frozen ? 'xSplit="2" ' : ""}ySplit="1" topLeftCell="${frozen ? "C2" : "A2"}" activePane="${frozen ? "bottomRight" : "bottomLeft"}" state="frozen"/></sheetView></sheetViews><cols>${(
+      `<worksheet xmlns="${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><dimension ref="A1:${last}"/><sheetViews><sheetView workbookViewId="0"><pane ${frozenColumns ? `xSplit="${frozenColumns}" ` : ""}ySplit="1" topLeftCell="${column(frozenColumns)}2" activePane="${frozenColumns ? "bottomRight" : "bottomLeft"}" state="frozen"/></sheetView></sheetViews><cols>${(
         table.rows[0] ?? [""]
       )
         .map((header, c) => {

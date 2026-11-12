@@ -7,6 +7,7 @@ import {
   auctionMarketSchema,
   type Character,
   characterSchema,
+  type ItemVendor,
   itemIdSchema,
   type Profession,
   type RecipeDetails,
@@ -107,6 +108,15 @@ const recipeDetailSchema = z.object({
   reagents: z
     .array(z.object({ reagent: recipeItem, quantity: positiveQuantity }))
     .max(100)
+    .optional(),
+});
+const itemSchema = z.object({
+  id: recipeItem.shape.id,
+  sell_price: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER)
     .optional(),
 });
 const talentsSchema = z.object({
@@ -465,6 +475,21 @@ export class BlizzardClient {
       },
       "normalized recipe details",
     );
+  }
+
+  async itemVendor(id: number): Promise<ItemVendor> {
+    const itemId = parseApi(recipeItem.shape.id, id, "item ID");
+    const data = parseApi(
+      itemSchema,
+      await this.get(`/data/wow/item/${itemId}`, "static"),
+      "item details",
+    );
+    if (data.id !== itemId)
+      throw new SafeError("Blizzard item identity did not match the request.");
+    return {
+      id: data.id,
+      ...(data.sell_price === undefined ? {} : { sellCopper: data.sell_price }),
+    };
   }
 
   async professions(

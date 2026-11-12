@@ -1,6 +1,9 @@
 import { isFatalApiError } from "./blizzard.ts";
 import { ApiError, mapConcurrent, SafeError } from "./http.ts";
 import {
+  type ItemVendor,
+  type ItemVendorEntry,
+  itemVendorSchema,
   type RecipeDetailEntry,
   type RecipeDetails,
   recipeDetailsSchema,
@@ -86,6 +89,79 @@ export async function refreshRecipeDetails(
     },
   );
   return { ...snapshot, recipeDetails: Object.fromEntries(entries) };
+}
+
+export interface ItemVendorSource {
+  itemVendor(id: number): Promise<ItemVendor>;
+}
+
+// Vendor sell prices for crafted outputs: static item data fetched once per
+// output ID and cached privately like recipe details. A failed request
+// retains the last successful price and its timestamp, labelled by status.
+export async function refreshItemVendorPrices(
+  snapshot: Snapshot,
+  source: ItemVendorSource,
+  previous?: Snapshot,
+  now = new Date(),
+): Promise<Snapshot> {
+  if (
+    previous &&
+    (previous.region !== snapshot.region || previous.guild !== snapshot.guild)
+  )
+    throw new SafeError("Item history belongs to a different guild or region.");
+  const ids = [
+    ...new Set(
+      Object.values(snapshot.recipeDetails ?? {}).flatMap((entry) =>
+        entry.data?.output ? [entry.data.output.id] : [],
+      ),
+    ),
+  ];
+  if (ids.length > 20_000)
+    throw new SafeError("Crafted item index exceeds 20,000 items.");
+  const entries = await mapConcurrent(
+    ids,
+    4,
+    async (id): Promise<[string, ItemVendorEntry]> => {
+      const key = String(id);
+      const old = previous?.itemVendor?.[key];
+      const age = old
+        ? now.getTime() - Date.parse(old.attemptedAt)
+        : Number.POSITIVE_INFINITY;
+      if (old && age >= 0 && age < cacheLifetime) return [key, old];
+      const attemptedAt = now.toISOString();
+      try {
+        const parsed = itemVendorSchema.safeParse(await source.itemVendor(id));
+        if (!parsed.success || parsed.data.id !== id)
+          throw new SafeError(
+            "Unsupported item details or mismatched identity.",
+          );
+        return [
+          key,
+          {
+            status: "ok",
+            attemptedAt,
+            fetchedAt: attemptedAt,
+            data: parsed.data,
+          },
+        ];
+      } catch (error) {
+        if (isFatalApiError(error)) throw error;
+        return [
+          key,
+          {
+            status:
+              error instanceof ApiError && error.status === 404
+                ? "unavailable"
+                : "error",
+            attemptedAt,
+            fetchedAt: old?.fetchedAt ?? null,
+            ...(old?.data ? { data: old.data } : {}),
+          },
+        ];
+      }
+    },
+  );
+  return { ...snapshot, itemVendor: Object.fromEntries(entries) };
 }
 
 export function recipeDetailStatus(

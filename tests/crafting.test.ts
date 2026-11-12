@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { refreshRecipeDetails } from "../src/crafting.ts";
+import {
+  refreshItemVendorPrices,
+  refreshRecipeDetails,
+} from "../src/crafting.ts";
 import { ApiError } from "../src/http.ts";
 import { snapshotSchema } from "../src/model.ts";
 import { buildTables, toCsv, toXlsx } from "../src/workbook.ts";
@@ -220,4 +223,74 @@ test("changing the pinned mapping build bypasses the detail cache and invalid sn
       reportTimeZone: "Invalid/Timezone",
     }).success,
   ).toBe(false);
+});
+
+test("vendor prices are fetched once per crafted output, cached, retained on failure, and abort on auth errors", async () => {
+  const withDetails = await refreshRecipeDetails(
+    input(),
+    { recipe: async () => details },
+    undefined,
+    now,
+  );
+  let calls = 0;
+  const source = {
+    itemVendor: async (id: number) => {
+      calls++;
+      expect(id).toBe(7001);
+      return { id, sellCopper: 25 };
+    },
+  };
+  const first = await refreshItemVendorPrices(
+    withDetails,
+    source,
+    undefined,
+    now,
+  );
+  expect(calls).toBe(1);
+  expect(first.itemVendor?.["7001"]?.data).toEqual({
+    id: 7001,
+    sellCopper: 25,
+  });
+  expect(snapshotSchema.safeParse(first).success).toBe(true);
+  await refreshItemVendorPrices(withDetails, source, first, now);
+  expect(calls).toBe(1);
+  const later = new Date(now.getTime() + 86_400_000);
+  for (const status of [404, 503]) {
+    const next = await refreshItemVendorPrices(
+      withDetails,
+      {
+        itemVendor: async () => {
+          throw new ApiError("Blizzard API", status);
+        },
+      },
+      first,
+      later,
+    );
+    expect(next.itemVendor?.["7001"]).toMatchObject({
+      status: status === 404 ? "unavailable" : "error",
+      fetchedAt: now.toISOString(),
+      attemptedAt: later.toISOString(),
+      data: { id: 7001, sellCopper: 25 },
+    });
+  }
+  const mismatched = await refreshItemVendorPrices(
+    withDetails,
+    { itemVendor: async () => ({ id: 9999, sellCopper: 1 }) },
+    undefined,
+    now,
+  );
+  expect(mismatched.itemVendor?.["7001"]?.status).toBe("error");
+  expect(mismatched.itemVendor?.["7001"]?.data).toBeUndefined();
+  await expect(
+    refreshItemVendorPrices(
+      withDetails,
+      {
+        itemVendor: async () => {
+          throw new ApiError("Blizzard API", 401);
+        },
+      },
+      first,
+      later,
+    ),
+  ).rejects.toThrow("HTTP 401");
 });
