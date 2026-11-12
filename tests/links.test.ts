@@ -5,6 +5,7 @@ import {
   armoryUrl,
   assertPublicLink,
   guildArmoryUrl,
+  hyjalItemUrl,
   itemUrl,
   recipeUrl,
   upstreamRepositoryUrl,
@@ -63,6 +64,35 @@ test("public links use encoded Forever slugs and validated Wowhead spell IDs", (
     "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/guild/example-guild/roster",
     "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/guild/example-guild?token=private",
     "https://www.wowhead.com/forever/search?q=Example#private",
+  ])
+    expect(() => assertPublicLink(target)).toThrow("allowed public");
+});
+
+test("Hyjal auction links come only from a known ruleset, faction and validated item ID", () => {
+  const market = { rulesetName: "Roleplay", faction: "Alliance" } as const;
+  const url = hyjalItemUrl("us", market, 279941);
+  expect(url).toBe("https://hyjal.cc/auctions/us/rp-pve/alliance/item/279941");
+  expect(() => assertPublicLink(url ?? "")).not.toThrow();
+  expect(
+    hyjalItemUrl("eu", { rulesetName: "Roleplay PvP", faction: "Horde" }, 7),
+  ).toBe("https://hyjal.cc/auctions/eu/rp-pvp/horde/item/7");
+  for (const rulesetName of ["Invented Ruleset", "toString", "__proto__"])
+    expect(
+      hyjalItemUrl("us", { rulesetName, faction: "Alliance" }, 1),
+    ).toBeUndefined();
+  for (const id of [0, -1, 1.5, 2_147_483_648])
+    expect(() => hyjalItemUrl("us", market, id)).toThrow();
+  expect(() => hyjalItemUrl("xx", market, 1)).toThrow();
+  for (const target of [
+    "http://hyjal.cc/auctions/us/rp-pve/alliance/item/1",
+    "https://hyjal.cc.evil.invalid/auctions/us/rp-pve/alliance/item/1",
+    "https://hyjal.cc/auctions/us/rp-pve/alliance/item/1?token=private",
+    "https://hyjal.cc/auctions/us/rp-pve/alliance/item/1#private",
+    "https://hyjal.cc/auctions/us/rp-pve/alliance/item/1/tanning-rack",
+    "https://hyjal.cc/auctions/us/other/alliance/item/1",
+    "https://hyjal.cc/auctions/us/rp-pve/alliance/item/0",
+    "https://hyjal.cc/auctions/us/rp-pve/alliance/item/2147483648",
+    "https://hyjal.cc/auctions/us/rp-pve/alliance/item/1/../../../private",
   ])
     expect(() => assertPublicLink(target)).toThrow("allowed public");
 });
