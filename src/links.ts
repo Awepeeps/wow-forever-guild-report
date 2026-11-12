@@ -30,7 +30,8 @@ export function itemUrl(itemId: number): string {
 
 // Hyjal's public auction browser names Forever rulesets by these market slugs;
 // unlisted rulesets get no link rather than a guessed one. Verified 2026-11-12
-// against the ruleset index (Normal, PvP, Roleplay, Roleplay PvP) and hyjal.cc.
+// against the ruleset index (Normal, PvP, Roleplay, Roleplay PvP) and hyjal.cc:
+// KR and TW serve only pve/pvp (their roleplay pages return 404).
 const hyjalMarkets: Record<string, string> = {
   Normal: "pve",
   PvP: "pvp",
@@ -38,7 +39,7 @@ const hyjalMarkets: Record<string, string> = {
   "Roleplay PvP": "rp-pvp",
 };
 const hyjalPath =
-  /^\/auctions\/(?:us|eu|kr|tw)\/(?:pve|pvp|rp-pve|rp-pvp)\/(?:alliance|horde|blackwater)\/item\/[1-9]\d{0,9}$/;
+  /^\/auctions\/(?:(?:us|eu)\/(?:pve|pvp|rp-pve|rp-pvp)|(?:kr|tw)\/(?:pve|pvp))\/(?:alliance|horde|blackwater)\/item\/[1-9]\d{0,9}$/;
 
 // The item ID alone resolves; Hyjal redirects to its own name slug, so no
 // API-provided name ever enters the URL.
@@ -51,7 +52,8 @@ export function hyjalItemUrl(
     ? hyjalMarkets[market.rulesetName]
     : undefined;
   if (!slug) return undefined;
-  return `https://hyjal.cc/auctions/${regionSchema.parse(region)}/${slug}/${market.faction.toLowerCase()}/item/${itemIdSchema.parse(itemId)}`;
+  const url = `https://hyjal.cc/auctions/${regionSchema.parse(region)}/${slug}/${market.faction.toLowerCase()}/item/${itemIdSchema.parse(itemId)}`;
+  return hyjalPath.test(new URL(url).pathname) ? url : undefined;
 }
 
 export function assertPublicLink(value: string): void {

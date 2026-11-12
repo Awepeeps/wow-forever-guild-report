@@ -83,6 +83,13 @@ test("Hyjal auction links come only from a known ruleset, faction and validated 
   for (const id of [0, -1, 1.5, 2_147_483_648])
     expect(() => hyjalItemUrl("us", market, id)).toThrow();
   expect(() => hyjalItemUrl("xx", market, 1)).toThrow();
+  // Hyjal has no roleplay markets for KR/TW, so those would be dead links.
+  for (const region of ["kr", "tw"]) {
+    expect(hyjalItemUrl(region, market, 1)).toBeUndefined();
+    expect(
+      hyjalItemUrl(region, { rulesetName: "PvP", faction: "Horde" }, 1),
+    ).toBe(`https://hyjal.cc/auctions/${region}/pvp/horde/item/1`);
+  }
   for (const target of [
     "http://hyjal.cc/auctions/us/rp-pve/alliance/item/1",
     "https://hyjal.cc.evil.invalid/auctions/us/rp-pve/alliance/item/1",
@@ -90,6 +97,7 @@ test("Hyjal auction links come only from a known ruleset, faction and validated 
     "https://hyjal.cc/auctions/us/rp-pve/alliance/item/1#private",
     "https://hyjal.cc/auctions/us/rp-pve/alliance/item/1/tanning-rack",
     "https://hyjal.cc/auctions/us/other/alliance/item/1",
+    "https://hyjal.cc/auctions/kr/rp-pve/alliance/item/1",
     "https://hyjal.cc/auctions/us/rp-pve/alliance/item/0",
     "https://hyjal.cc/auctions/us/rp-pve/alliance/item/2147483648",
     "https://hyjal.cc/auctions/us/rp-pve/alliance/item/1/../../../private",

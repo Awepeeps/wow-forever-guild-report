@@ -17,6 +17,7 @@ import {
   configSchema,
   snapshotSchema,
 } from "../src/model.ts";
+import { columnPresentation } from "../src/presentation.ts";
 import { sheetRequests } from "../src/sheets.ts";
 import { buildTables, toCsv, toXlsx } from "../src/workbook.ts";
 import { snapshot } from "./helpers.ts";
@@ -463,10 +464,26 @@ test("Hyjal AH links the crafted item for the configured market in Sheets and XL
   expect(JSON.stringify(sheetRequests(tables, []))).toContain(
     `"link":{"uri":"${url}"}`,
   );
+  expect(columnPresentation("Recipes", "Hyjal AH").hidden).toBe(false);
+  expect(columnPresentation("Recipes", "Hyjal URL").hidden).toBe(true);
+  // XLSX may widen the materials column, so locate the linked cell by text.
   const files = unzipSync(toXlsx(tables));
-  expect(
-    strFromU8(files["xl/worksheets/_rels/sheet3.xml.rels"] ?? new Uint8Array()),
-  ).toContain(`Target="${url}"`);
+  const rels = strFromU8(
+    files["xl/worksheets/_rels/sheet3.xml.rels"] ?? new Uint8Array(),
+  );
+  const rel = rels.match(
+    new RegExp(`Id="(link\\d+)"[^>]*Target="${url.replaceAll(".", "\\.")}"`),
+  )?.[1];
+  const sheet = strFromU8(
+    files["xl/worksheets/sheet3.xml"] ?? new Uint8Array(),
+  );
+  const ref = sheet.match(
+    new RegExp(`<hyperlink ref="([A-Z]+2)" r:id="${rel}"/>`),
+  )?.[1];
+  expect(ref).toBeDefined();
+  expect(sheet).toMatch(
+    new RegExp(`<c r="${ref}"[^>]*>(?:(?!</c>).)*View on Hyjal`),
+  );
   const unconfigured = buildTables({
     ...roleplay,
     auctionMarket: undefined,
