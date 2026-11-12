@@ -4,6 +4,8 @@ import { HttpClient } from "../src/http.ts";
 import {
   armoryUrl,
   assertPublicLink,
+  blizzardDataSharingHelpUrl,
+  blizzardPrivacySettingsUrl,
   guildArmoryUrl,
   hyjalItemUrl,
   itemUrl,
@@ -43,6 +45,9 @@ test("public links use encoded Forever slugs and validated Wowhead spell IDs", (
     "https://github.com/deathpie/wow-forever-guild-report",
     `${upstreamRepositoryUrl}?token=private`,
     `${upstreamRepositoryUrl}/issues/new`,
+    `${blizzardPrivacySettingsUrl}/other`,
+    `${blizzardDataSharingHelpUrl}?flowTrackingId=x`,
+    "https://account.blizzard.com/",
     "https://www.wowhead.com/forever/search?q=a&q=b",
     "file:///etc/passwd",
     "http://www.wowhead.com/forever/search?q=Example",
@@ -145,6 +150,16 @@ test("XLSX hyperlinks are validated relationships, CSV keeps URLs, and Sheets li
   expect(sourceLinks).toContain(`Target="${upstreamRepositoryUrl}"`);
   const info = tables.find((t) => t.name === "Automated Export Info");
   expect(toCsv(info?.rows ?? [])).toContain(upstreamRepositoryUrl);
+  // The opt-out guidance comes first, with its fixed Blizzard links clickable.
+  expect(info?.rows[1]?.[0]).toBe("Opting out of data sharing");
+  for (const url of [blizzardPrivacySettingsUrl, blizzardDataSharingHelpUrl]) {
+    expect(info?.links).toContainEqual({
+      row: info?.rows.findIndex((r) => r[1] === url) ?? -1,
+      column: 1,
+      url,
+    });
+    expect(sourceLinks).toContain(`Target="${url}"`);
+  }
   const xlsx = strFromU8(files["xl/worksheets/sheet1.xml"] ?? new Uint8Array());
   expect(xlsx).toContain('<hyperlink ref="B2" r:id="link1"/>');
   const recipes = strFromU8(
