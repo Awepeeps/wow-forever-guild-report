@@ -19,6 +19,8 @@ import {
 } from "./dates.ts";
 import {
   armoryUrl,
+  blizzardDataSharingHelpUrl,
+  blizzardPrivacySettingsUrl,
   guildArmoryUrl,
   hyjalItemUrl,
   type ItemLinkList,
@@ -524,6 +526,12 @@ export function buildTables(snapshot: Snapshot): Table[] {
   }
   const reference: Cell[][] = [
     ["Topic", "Details"],
+    [
+      "Opting out of data sharing",
+      "This report uses only Blizzard's official API. To keep your characters out of third-party tools, including this sheet, turn off \"Share my game data with community developers\" in your Battle.net account under Privacy & Communications → Game Data and Profile Privacy. It applies to every character on the account, takes some time to take effect, and does not hide you from Blizzard's own Armory. Other sites may keep data they already collected until they purge it. Until it takes effect, or if you'd rather just be left out of this sheet, ask an officer.",
+    ],
+    ["Battle.net privacy settings", blizzardPrivacySettingsUrl],
+    ["Blizzard help article (login required)", blizzardDataSharingHelpUrl],
     ["Source code (upstream)", upstreamRepositoryUrl],
     ["Report a problem", upstreamIssuesUrl],
     [
@@ -657,10 +665,18 @@ export function buildTables(snapshot: Snapshot): Table[] {
     {
       name: "Automated Export Info",
       rows: reference,
-      links: [
-        { row: 1, column: 1, url: upstreamRepositoryUrl },
-        { row: 2, column: 1, url: upstreamIssuesUrl },
-      ],
+      // Every fixed URL in Details becomes a link, wherever its row sits.
+      links: reference.flatMap((row, i) =>
+        i > 0 &&
+        [
+          blizzardPrivacySettingsUrl,
+          blizzardDataSharingHelpUrl,
+          upstreamRepositoryUrl,
+          upstreamIssuesUrl,
+        ].includes(String(row[1]))
+          ? [{ row: i, column: 1, url: String(row[1]) }]
+          : [],
+      ),
     },
   ];
 }
