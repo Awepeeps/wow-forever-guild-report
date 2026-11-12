@@ -486,7 +486,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ["Report a problem", upstreamIssuesUrl],
     [
       "Refreshing this workbook",
-      "Run just refresh with the private guild config and output directory to refresh local exports; exit 2 means partial data was retained. Publishing to Google Sheets is a separate, explicitly requested just sheets step. Check Guild Info for last refresh and API coverage. Do not attach private rosters, notes, credentials or exports to a public issue.",
+      "Run just refresh with the private guild config and output directory to refresh local exports; exit 2 means some API data was unavailable (failed components are blanked and labelled). Publishing to Google Sheets is a separate, explicitly requested just sheets step. Check Guild Info for last refresh and API coverage. Do not attach private rosters, notes, credentials or exports to a public issue.",
     ],
     [
       "Layout",
@@ -535,11 +535,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Character metrics",
-      "iLvl is equipped item level; Average ilvl is hidden. Blank means unknown. A successful profile omitting a metric clears it; a failed profile retains prior values and last-success time. Sheets Last Login requires the validated en_US spreadsheet locale and shows Today/1 day ago/N days ago with a trusted DATE/TODAY formula in the spreadsheet timezone; unsupported locales stop before writing. Hourly-or-faster recalculation keeps the age current. The exact Blizzard UTC timestamp is hidden and can lag. XLSX/CSV Last Login (at export) is static at Generated At, using UTC calendar dates. Age recalculation does not fetch new Blizzard data.",
+      "iLvl is equipped item level; Average ilvl is hidden. Blank means unknown. A successful profile omitting a metric clears it; a failed profile, talent or profession request also clears the values that endpoint owns instead of showing them stale (hidden last-success times remain). Sheets Last Login requires the validated en_US spreadsheet locale and shows Today/1 day ago/N days ago with a trusted DATE/TODAY formula in the spreadsheet timezone; unsupported locales stop before writing. Hourly-or-faster recalculation keeps the age current. The exact Blizzard UTC timestamp is hidden and can lag. XLSX/CSV Last Login (at export) is static at Generated At, using UTC calendar dates. Age recalculation does not fetch new Blizzard data.",
     ],
     [
       "Recipes",
-      "Recipes lists profession, recipe and known characters (with Discord), sorted by profession then recipe. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests retain known recipes with per-character last-success labels. Successful responses omitting recipe lists retain only the same profession/tier knowledge and its original recipe-specific timestamp; explicit empty lists clear it. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
+      "Recipes lists profession, recipe and known characters (with Discord), sorted by profession then recipe. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests remove that character's recipe knowledge until a later refresh succeeds. Successful responses omitting recipe lists retain only the same profession/tier knowledge and its original recipe-specific timestamp; explicit empty lists clear it. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
     ],
     [
       "Recipe materials and output",

@@ -23,6 +23,36 @@ export interface RosterSource {
 
 class IdentityConflictError extends SafeError {}
 
+// Values each enrichment endpoint owns. When its request fails, values from
+// earlier refreshes are cleared rather than shown as if current; only values
+// supplied explicitly in the private config survive. Identity, class, level,
+// rank, ruleset, faction and race also come from discovery/config and stay.
+const componentFields = {
+  profile: [
+    "equippedItemLevel",
+    "averageItemLevel",
+    "achievementPoints",
+    "experience",
+    "lastLoginAt",
+  ],
+  professions: ["primary", "secondary"],
+  talents: ["talents"],
+} as const satisfies Record<
+  keyof Omit<RosterSource, "guild">,
+  readonly (keyof Character)[]
+>;
+
+function clearComponent(
+  character: Character,
+  component: keyof typeof componentFields,
+  supplied: object | undefined,
+): Character {
+  const cleared: Record<string, unknown> = { ...character };
+  for (const field of componentFields[component])
+    if (!supplied || !Object.hasOwn(supplied, field)) delete cleared[field];
+  return characterSchema.parse(cleared);
+}
+
 function refreshRecipeKnowledge(
   current: Profession[],
   previous: Profession[],
@@ -166,6 +196,12 @@ export async function refreshRoster(
     4,
     async (original): Promise<RosterRow> => {
       let character = original;
+      const supplied = config.characters.find(
+        (c) =>
+          (c.id !== undefined && c.id === original.id) ||
+          c.slug.toLocaleLowerCase("en-US") ===
+            original.slug.toLocaleLowerCase("en-US"),
+      );
       const prior = priorFor(original);
       const row: RosterRow = {
         character,
@@ -229,11 +265,12 @@ export async function refreshRoster(
           if (component === "profile") row.profileStatus = status;
           else if (component === "professions") row.professionStatus = status;
           else row.talentStatus = status;
+          character = clearComponent(character, component, supplied);
           const detail =
             status === "unavailable"
               ? "HTTP 404; profile may be unpublished, below level 10, or temporarily unavailable"
               : "request or response validation failed";
-          row.issue += `${component}: ${detail}; retained supplied values. `;
+          row.issue += `${component}: ${detail}; cleared values from earlier refreshes${supplied ? " (configured values kept)" : ""}. `;
         }
       }
       row.character = character;
