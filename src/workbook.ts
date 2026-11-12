@@ -2,7 +2,9 @@ import { strToU8, zipSync } from "fflate";
 import {
   auctionSnapshotAt,
   auctionStatus,
+  type MoneyDisplay,
   materialPriceSuffix,
+  moneyDisplay,
   recipePrices,
 } from "./auctions.ts";
 import {
@@ -49,6 +51,24 @@ import { knowerChunks, knownRecipes, recipeCoverage } from "./recipes.ts";
 export type Cell = string | number;
 export const marginHeader = "AH Margin / Craft";
 export const hyjalHeader = "Hyjal AH";
+export const outputPriceHeader = "Output AH / Item";
+export const materialsPriceHeader = "Materials AH / Craft";
+export const listedHeader = "Output Listed";
+/** Columns whose numeric cells hold raw copper, displayed as coins by a number format. */
+export const moneyHeaders: readonly string[] = [
+  outputPriceHeader,
+  materialsPriceHeader,
+  marginHeader,
+];
+/**
+ * A numeric copper cell shown as coins. The renderer derives the pattern from
+ * the cell's own number (and a range's numeric upper bound), never from text.
+ */
+export interface MoneyCell {
+  row: number;
+  column: number;
+  upperCopper?: number;
+}
 /** Green/red emphasis for a signed value; never the only signal (text keeps its sign). */
 export interface CellTone {
   row: number;
@@ -62,6 +82,7 @@ export interface Table {
   itemLists?: ItemLinkList[];
   relativeDates?: RelativeDate[];
   tones?: CellTone[];
+  money?: MoneyCell[];
 }
 
 function notesLast(rows: Cell[][]): void {
@@ -235,6 +256,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
   const recipeEntries = knownRecipes(snapshot);
   const recipeItemLists: ItemLinkList[] = [];
   const recipeTones: CellTone[] = [];
+  const recipeMoney: MoneyCell[] = [];
   const craftedItemLinks: PublicLink[] = [];
   const recipes: Cell[][] = [
     [
@@ -245,9 +267,10 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Known By",
       "Recipe Details",
       "Knower Data",
-      "Output AH / Item",
+      outputPriceHeader,
+      listedHeader,
       hyjalHeader,
-      "Materials AH / Craft",
+      materialsPriceHeader,
       marginHeader,
       "AH Data",
       "AH Snapshot (UTC)",
@@ -265,7 +288,6 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Output AH Copper",
       "Materials AH Copper",
       "AH Margin Copper",
-      "Output AH Quantity",
       "Auction House ID",
       "Auction Last Success",
       "Auction Last Attempt",
@@ -292,6 +314,27 @@ export function buildTables(snapshot: Snapshot): Table[] {
           column: recipes[0]?.indexOf(marginHeader) ?? -1,
           tone: prices.tone,
         });
+      const header = recipes[0] ?? [];
+      if (snapshot.auctionMarket) {
+        if (prices.outputCopper !== undefined)
+          recipeMoney.push({
+            row,
+            column: header.indexOf(outputPriceHeader),
+          });
+        if (prices.materialCopper !== undefined)
+          recipeMoney.push({
+            row,
+            column: header.indexOf(materialsPriceHeader),
+          });
+        if (prices.marginCopper !== undefined)
+          recipeMoney.push({
+            row,
+            column: header.indexOf(marginHeader),
+            ...(prices.marginHighCopper !== undefined
+              ? { upperCopper: prices.marginHighCopper }
+              : {}),
+          });
+      }
       const output = details?.data?.output;
       const materials =
         details?.data?.reagents?.map((r) => ({
@@ -322,7 +365,10 @@ export function buildTables(snapshot: Snapshot): Table[] {
         chunk,
         recipeDetailStatus(details),
         status,
-        snapshot.auctionMarket ? prices.output : "Not configured",
+        !snapshot.auctionMarket
+          ? "Not configured"
+          : (prices.outputCopper ?? prices.output),
+        prices.outputQuantity ?? "",
         hyjal
           ? "View on Hyjal"
           : !snapshot.auctionMarket
@@ -330,8 +376,12 @@ export function buildTables(snapshot: Snapshot): Table[] {
             : output
               ? "No Hyjal market"
               : "Output unknown",
-        snapshot.auctionMarket ? prices.materialCost : "Not configured",
-        snapshot.auctionMarket ? prices.margin : "Not configured",
+        !snapshot.auctionMarket
+          ? "Not configured"
+          : (prices.materialCopper ?? prices.materialCost),
+        !snapshot.auctionMarket
+          ? "Not configured"
+          : (prices.marginCopper ?? prices.margin),
         prices.status,
         auctionSnapshotAt(snapshot) ??
           (snapshot.auctionMarket ? "Not provided" : ""),
@@ -349,7 +399,6 @@ export function buildTables(snapshot: Snapshot): Table[] {
         prices.outputCopper ?? "",
         prices.materialCopper ?? "",
         prices.marginCopper ?? "",
-        prices.outputQuantity ?? "",
         snapshot.auctionMarket?.houseId ?? "",
         snapshot.auctionPrices?.fetchedAt ?? "",
         snapshot.auctionPrices?.attemptedAt ?? "",
@@ -549,7 +598,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Auction prices",
-      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; output prices also show buyout quantity listed. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield, less the configured auction house cut (see AH Margin Basis on Guild Info), minus Materials AH / Craft; a range for variable yields. Listing deposits are excluded because they are refunded on sale but lost if the auction expires. It is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times, fetch diagnostics and numeric copper values are hidden/available in CSV. Item-ID matching does not distinguish random bonuses. Hyjal AH opens the crafted item's page on hyjal.cc, an independent third-party auction browser, for the same region, ruleset and faction market; its listings may be refreshed on a different schedule than this export.",
+      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; Output Listed is the buyout quantity listed. Output AH / Item, Materials AH / Craft and AH Margin / Craft store raw copper numbers shown as coins by a number format, so they sort and filter by value; a margin range sorts by its low end. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield, less the configured auction house cut (see AH Margin Basis on Guild Info), minus Materials AH / Craft; a range for variable yields. Listing deposits are excluded because they are refunded on sale but lost if the auction expires. It is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times and fetch diagnostics are hidden/available in CSV; CSV has no number formats, so its price columns carry the coin text and the hidden copper columns carry the numbers. Item-ID matching does not distinguish random bonuses. Hyjal AH opens the crafted item's page on hyjal.cc, an independent third-party auction browser, for the same region, ruleset and faction market; its listings may be refreshed on a different schedule than this export.",
     ],
     [
       "Public links",
@@ -588,6 +637,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       rows: recipes,
       itemLists: recipeItemLists,
       tones: recipeTones,
+      money: recipeMoney,
       links: [
         ...recipes.slice(1).flatMap((row, i) => {
           const url = row[recipes[0]?.indexOf("Recipe URL") ?? -1];
@@ -752,6 +802,14 @@ function xlsxItemColumns(table: Table): Table {
           })),
         }
       : {}),
+    ...(table.money
+      ? {
+          money: table.money.map((cell) => ({
+            ...cell,
+            column: columns[cell.column] ?? cell.column,
+          })),
+        }
+      : {}),
   };
 }
 
@@ -764,6 +822,48 @@ export function validatedTones(table: Table): CellTone[] {
       column >= 0 &&
       tone.row >= 1 &&
       tone.row < table.rows.length,
+  );
+}
+
+/**
+ * Money formats only ever apply to numeric cells in the generated price
+ * columns; each pattern is rebuilt from the cell's validated number.
+ */
+export function validatedMoney(table: Table): (MoneyCell & MoneyDisplay)[] {
+  const header = table.rows[0] ?? [];
+  return (table.money ?? []).flatMap((cell) => {
+    const name = String(header[cell.column] ?? "");
+    const value = table.rows[cell.row]?.[cell.column];
+    if (
+      cell.row < 1 ||
+      cell.row >= table.rows.length ||
+      !moneyHeaders.includes(name) ||
+      typeof value !== "number"
+    )
+      return [];
+    const signed = name === marginHeader;
+    if (!signed && cell.upperCopper !== undefined) return [];
+    return [
+      {
+        ...cell,
+        ...moneyDisplay(value, {
+          signed,
+          ...(cell.upperCopper !== undefined
+            ? { upperCopper: cell.upperCopper }
+            : {}),
+        }),
+      },
+    ];
+  });
+}
+
+/** Rows as a format-less reader (CSV) would see them: coin text, not raw copper. */
+export function displayRows(table: Table): Cell[][] {
+  const text = new Map(
+    validatedMoney(table).map((m) => [`${m.row}:${m.column}`, m.text]),
+  );
+  return table.rows.map((row, r) =>
+    row.map((cell, c) => text.get(`${r}:${c}`) ?? cell),
   );
 }
 
@@ -788,6 +888,32 @@ export function toXlsx(tables: Table[]): Uint8Array {
     ),
   ];
   const classStyles = classNames.map(classStyle);
+  const prepared = tables.map(xlsxItemColumns);
+  // Money cells get extra styles: one custom number format per distinct
+  // pattern, combined with the cell's gain/loss tone where it has one.
+  const moneyCells = prepared.map((table) => {
+    const tones = new Map(
+      validatedTones(table).map((t) => [`${t.row}:${t.column}`, t.tone]),
+    );
+    return new Map(
+      validatedMoney(table).map((m) => [
+        `${m.row}:${m.column}`,
+        { pattern: m.pattern, tone: tones.get(`${m.row}:${m.column}`) },
+      ]),
+    );
+  });
+  const patterns = [
+    ...new Set(
+      moneyCells.flatMap((m) => [...m.values()].map((v) => v.pattern)),
+    ),
+  ];
+  const moneyStyleKeys = [
+    ...new Set(
+      moneyCells.flatMap((m) =>
+        [...m.values()].map((v) => `${v.tone ?? ""}|${v.pattern}`),
+      ),
+    ),
+  ];
   const files: Record<string, Uint8Array> = {};
   const add = (path: string, body: string) => {
     files[path] = strToU8(
@@ -813,12 +939,21 @@ export function toXlsx(tables: Table[]): Uint8Array {
     `<Relationships xmlns="${relns}">${tables.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
   );
   const tones = ["gain", "loss"] as const;
+  const moneyXfs = moneyStyleKeys
+    .map((key) => {
+      const split = key.indexOf("|");
+      const tone = tones.indexOf(key.slice(0, split) as "gain" | "loss");
+      const format = 164 + patterns.indexOf(key.slice(split + 1));
+      return tone < 0
+        ? `<xf numFmtId="${format}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"><alignment vertical="top" wrapText="1"/></xf>`
+        : `<xf numFmtId="${format}" fontId="${3 + classStyles.length + tone}" fillId="${4 + classStyles.length + tone}" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`;
+    })
+    .join("");
   add(
     "xl/styles.xml",
-    `<styleSheet xmlns="${ns}"><fonts count="${5 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}<font><u/><color rgb="FF0563C1"/><sz val="11"/><name val="Calibri"/></font>${tones.map((tone) => `<font><b/><color rgb="FF${toneStyles[tone].foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}</fonts><fills count="${6 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill>${tones.map((tone) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${toneStyles[tone].background}"/></patternFill></fill>`).join("")}</fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${7 + classStyles.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}<xf numFmtId="0" fontId="0" fillId="${3 + classStyles.length}" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>${[0, 3 + classStyles.length].map((fill) => `<xf numFmtId="0" fontId="${2 + classStyles.length}" fillId="${fill}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}${tones.map((_, t) => `<xf numFmtId="0" fontId="${3 + classStyles.length + t}" fillId="${4 + classStyles.length + t}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
+    `<styleSheet xmlns="${ns}">${patterns.length ? `<numFmts count="${patterns.length}">${patterns.map((pattern, i) => `<numFmt numFmtId="${164 + i}" formatCode="${xml(pattern)}"/>`).join("")}</numFmts>` : ""}<fonts count="${5 + classStyles.length}"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>${classStyles.map((style) => `<font><b/><color rgb="FF${style.foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}<font><u/><color rgb="FF0563C1"/><sz val="11"/><name val="Calibri"/></font>${tones.map((tone) => `<font><b/><color rgb="FF${toneStyles[tone].foreground}"/><sz val="11"/><name val="Calibri"/></font>`).join("")}</fonts><fills count="${6 + classStyles.length}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173B53"/></patternFill></fill>${classStyles.map((style) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${style.background}"/></patternFill></fill>`).join("")}<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill>${tones.map((tone) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${toneStyles[tone].background}"/></patternFill></fill>`).join("")}</fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${7 + classStyles.length + moneyStyleKeys.length}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1"/></xf>${classStyles.map((_, i) => `<xf numFmtId="0" fontId="${i + 2}" fillId="${i + 3}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}<xf numFmtId="0" fontId="0" fillId="${3 + classStyles.length}" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>${[0, 3 + classStyles.length].map((fill) => `<xf numFmtId="0" fontId="${2 + classStyles.length}" fillId="${fill}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}${tones.map((_, t) => `<xf numFmtId="0" fontId="${3 + classStyles.length + t}" fillId="${4 + classStyles.length + t}" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf>`).join("")}${moneyXfs}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
   );
-  tables.forEach((inputTable, i) => {
-    const table = xlsxItemColumns(inputTable);
+  prepared.forEach((table, i) => {
     validatedRelativeDates(table);
     const links = validatedLinks(table.rows, table.links);
     const linkCells = new Set(
@@ -853,19 +988,26 @@ export function toXlsx(tables: Table[]): Uint8Array {
                   ? classNames.indexOf(String(cell).trim().toLowerCase())
                   : -1;
               const tone = toneCells.get(`${r}:${c}`);
+              const money = moneyCells[i]?.get(`${r}:${c}`);
               const style =
                 r === 0
                   ? 1
-                  : tone
-                    ? 5 + classStyles.length + tones.indexOf(tone)
-                    : linkCells.has(`${r}:${c}`)
-                      ? (c < 2 && shadedRows.has(r) ? 4 : 3) +
-                        classStyles.length
-                      : c < 2 && shadedRows.has(r)
-                        ? 2 + classStyles.length
-                        : colorIndex < 0
-                          ? 0
-                          : colorIndex + 2;
+                  : money
+                    ? 7 +
+                      classStyles.length +
+                      moneyStyleKeys.indexOf(
+                        `${money.tone ?? ""}|${money.pattern}`,
+                      )
+                    : tone
+                      ? 5 + classStyles.length + tones.indexOf(tone)
+                      : linkCells.has(`${r}:${c}`)
+                        ? (c < 2 && shadedRows.has(r) ? 4 : 3) +
+                          classStyles.length
+                        : c < 2 && shadedRows.has(r)
+                          ? 2 + classStyles.length
+                          : colorIndex < 0
+                            ? 0
+                            : colorIndex + 2;
               return `<c r="${column(c)}${r + 1}" s="${style}" t="${typeof output === "number" ? "n" : "inlineStr"}">${typeof output === "number" ? `<v>${output}</v>` : `<is><t xml:space="preserve">${xml(output)}</t></is>`}</c>`;
             })
             .join("")}</row>`,

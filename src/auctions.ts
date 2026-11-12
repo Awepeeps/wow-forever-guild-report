@@ -107,26 +107,76 @@ export function auctionStatus(snapshot: Snapshot): string {
     : "Snapshot";
 }
 
-export function money(copper: number): string {
-  if (copper > 0 && copper < 0.01) return "<0.01c";
-  const rounded = Math.round(copper * 100) / 100;
-  const gold = Math.floor(rounded / 10000);
-  const silver = Math.floor((rounded - gold * 10000) / 100);
-  const change = Number((rounded - gold * 10000 - silver * 100).toFixed(2));
-  return [
-    gold ? `${gold}g` : "",
-    silver ? `${silver}s` : "",
-    change || (!gold && !silver) ? `${change}c` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+/**
+ * Sortable money: a spreadsheet cell stores raw copper and this number format
+ * shows coins. The pattern is built only from validated numbers and fixed
+ * literals, never from data text. Formats round to whole copper, the smallest
+ * coin, so `text` mirrors the rendered value for format-less outputs (CSV).
+ */
+export interface MoneyDisplay {
+  pattern: string;
+  text: string;
 }
 
-/** Signed whole-copper amount; copper is the smallest coin a sale can yield. */
-export function signedMoney(copper: number): string {
-  const rounded = Math.round(copper);
-  if (rounded === 0) return "±0c";
-  return `${rounded > 0 ? "+" : "−"}${money(Math.abs(rounded))}`;
+function coinPattern(copper: number): string {
+  return copper >= 10000
+    ? '0"g "00"s "00"c"'
+    : copper >= 100
+      ? '0"s "00"c"'
+      : '0"c"';
+}
+
+function coinText(copper: number): string {
+  const gold = Math.floor(copper / 10000),
+    silver = Math.floor(copper / 100) % 100,
+    change = copper % 100;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return copper >= 10000
+    ? `${gold}g ${pad(silver)}s ${pad(change)}c`
+    : copper >= 100
+      ? `${silver}s ${pad(change)}c`
+      : `${change}c`;
+}
+
+export function moneyDisplay(
+  copper: number,
+  options: { signed?: boolean; upperCopper?: number } = {},
+): MoneyDisplay {
+  const { signed = false, upperCopper } = options;
+  if (
+    !Number.isFinite(copper) ||
+    Math.abs(copper) > Number.MAX_SAFE_INTEGER ||
+    (!signed && copper < 0) ||
+    (upperCopper !== undefined &&
+      (!signed ||
+        !Number.isFinite(upperCopper) ||
+        Math.abs(upperCopper) > Number.MAX_SAFE_INTEGER ||
+        upperCopper < copper))
+  )
+    throw new Error("Invalid money value");
+  // Spreadsheet formats round half away from zero, so round the magnitude.
+  const whole = Math.round(Math.abs(copper));
+  if (!signed)
+    // A sub-copper average (a stack bought out below 1c each) keeps decimals.
+    return copper > 0 && copper < 1
+      ? { pattern: '0.00"c"', text: `${copper.toFixed(2)}c` }
+      : { pattern: coinPattern(whole), text: coinText(whole) };
+  const signedText = (value: number) => {
+    const magnitude = Math.round(Math.abs(value));
+    return magnitude === 0
+      ? "±0c"
+      : `${value > 0 ? "+" : "−"}${coinText(magnitude)}`;
+  };
+  const suffix =
+    upperCopper !== undefined && upperCopper !== copper
+      ? ` to ${signedText(upperCopper)}`
+      : "";
+  const literal = suffix ? `"${suffix}"` : "";
+  const pattern =
+    whole === 0
+      ? Array(3).fill(`"±0c${suffix}"`).join(";")
+      : `"+"${coinPattern(whole)}${literal};"−"${coinPattern(whole)}${literal}`;
+  return { pattern, text: `${signedText(copper)}${suffix}` };
 }
 
 export function recipePrices(
@@ -140,6 +190,7 @@ export function recipePrices(
   outputQuantity?: number;
   margin: string;
   marginCopper?: number;
+  marginHighCopper?: number;
   tone?: "gain" | "loss";
   status: string;
 } {
@@ -168,7 +219,7 @@ export function recipePrices(
         total += (data.items[String(id)]?.unitCopper ?? 0) * quantity;
       if (Number.isFinite(total) && total <= Number.MAX_SAFE_INTEGER) {
         materialCopper = total;
-        materialCost = money(total);
+        materialCost = moneyDisplay(total).text;
       }
     }
   }
@@ -177,6 +228,7 @@ export function recipePrices(
   // A variable yield gives a range; it is only colored when both ends agree.
   let margin = "Unknown";
   let marginCopper: number | undefined;
+  let marginHighCopper: number | undefined;
   let tone: "gain" | "loss" | undefined;
   if (output && materialCopper !== undefined && details?.quantity) {
     const net =
@@ -189,10 +241,8 @@ export function recipePrices(
       Math.abs(high) <= Number.MAX_SAFE_INTEGER
     ) {
       marginCopper = low;
-      margin =
-        low === high
-          ? signedMoney(low)
-          : `${signedMoney(low)} to ${signedMoney(high)}`;
+      marginHighCopper = high;
+      margin = moneyDisplay(low, { signed: true, upperCopper: high }).text;
       tone =
         Math.round(low) > 0
           ? "gain"
@@ -205,7 +255,7 @@ export function recipePrices(
   const status = auctionStatus(snapshot);
   return {
     output: output
-      ? `${money(output.unitCopper)} (${output.quantity} listed)`
+      ? moneyDisplay(output.unitCopper).text
       : data && details?.output
         ? "No buyout listings"
         : "Unknown",
@@ -217,6 +267,7 @@ export function recipePrices(
       : {}),
     margin,
     ...(marginCopper !== undefined ? { marginCopper } : {}),
+    ...(marginHighCopper !== undefined ? { marginHighCopper } : {}),
     ...(tone ? { tone } : {}),
     status: data && incomplete ? `${status}; some prices unavailable` : status,
   };
@@ -230,7 +281,7 @@ export function materialPriceSuffix(
   const data = snapshot.auctionPrices?.data;
   const item = data?.items[String(itemId)];
   return item
-    ? ` — ${money(item.unitCopper)} each`
+    ? ` — ${moneyDisplay(item.unitCopper).text} each`
     : data
       ? " — no buyout listings"
       : " — price unknown";

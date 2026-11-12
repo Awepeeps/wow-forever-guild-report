@@ -4,7 +4,7 @@ import type { z } from "zod";
 import { SafeError } from "./http.ts";
 import type { Snapshot } from "./model.ts";
 import { exportHeader } from "./presentation.ts";
-import { buildTables, toCsv, toXlsx } from "./workbook.ts";
+import { buildTables, displayRows, toCsv, toXlsx } from "./workbook.ts";
 
 export async function readJson<T>(
   path: string,
@@ -60,7 +60,7 @@ export async function writeExports(
     await atomicWrite(
       join(directory, `${table.name.toLowerCase().replaceAll(" ", "-")}.csv`),
       toCsv(
-        table.rows.map((row, i) =>
+        displayRows(table).map((row, i) =>
           i === 0 ? row.map((cell) => exportHeader(table.name, cell)) : row,
         ),
       ),

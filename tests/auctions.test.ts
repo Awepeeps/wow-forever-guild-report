@@ -4,10 +4,9 @@ import {
   auctionSnapshotAt,
   auctionStatus,
   materialPriceSuffix,
-  money,
+  moneyDisplay,
   recipePrices,
   refreshAuctionPrices,
-  signedMoney,
 } from "../src/auctions.ts";
 import { BlizzardClient } from "../src/blizzard.ts";
 import { ApiError, HttpClient } from "../src/http.ts";
@@ -19,7 +18,13 @@ import {
 } from "../src/model.ts";
 import { columnPresentation } from "../src/presentation.ts";
 import { sheetRequests } from "../src/sheets.ts";
-import { buildTables, toCsv, toXlsx } from "../src/workbook.ts";
+import {
+  buildTables,
+  displayRows,
+  toCsv,
+  toXlsx,
+  validatedMoney,
+} from "../src/workbook.ts";
 import { snapshot } from "./helpers.ts";
 
 const now = new Date("2026-11-08T13:30:00.000Z");
@@ -320,7 +325,7 @@ test("recipe costs distinguish missing data, actual zero reagents, insufficient 
     now,
   );
   expect(recipePrices(current, details)).toMatchObject({
-    output: "10s (8 listed)",
+    output: "10s 00c",
     outputCopper: 1000,
     outputQuantity: 8,
     materialCost: "74c",
@@ -361,10 +366,10 @@ test("recipe costs distinguish missing data, actual zero reagents, insufficient 
     },
   };
   expect(recipePrices(overflow, details).materialCopper).toBeUndefined();
-  expect(money(0)).toBe("0c");
-  expect(money(12345)).toBe("1g 23s 45c");
-  expect(money(1 / 3)).toBe("0.33c");
-  expect(money(0.001)).toBe("<0.01c");
+  expect(moneyDisplay(0).text).toBe("0c");
+  expect(moneyDisplay(12345).text).toBe("1g 23s 45c");
+  expect(moneyDisplay(10005).text).toBe("1g 00s 05c");
+  expect(moneyDisplay(1 / 3).text).toBe("0.33c");
 });
 
 test("snapshot time is Blizzard's oldest endpoint timestamp, with missing/old source times disclosed", async () => {
@@ -400,11 +405,13 @@ test("price columns and linked material text stay literal in Sheets, CSV and XLS
   if (!table) throw new Error("fixture");
   const value = (header: string) =>
     table.rows[1]?.[table.rows[0]?.indexOf(header) ?? -1];
-  expect(value("Output AH / Item")).toBe("10s (8 listed)");
+  // Prices are raw copper so they sort numerically; the listing count is its own column.
+  expect(value("Output AH / Item")).toBe(1000);
+  expect(value("Output Listed")).toBe(8);
   // The fixture's invented ruleset has no Hyjal market, so nothing is guessed.
   expect(value("Hyjal AH")).toBe("No Hyjal market");
   expect(value("Hyjal URL")).toBe("");
-  expect(value("Materials AH / Craft")).toBe("74c");
+  expect(value("Materials AH / Craft")).toBe(74);
   expect(value("Materials per Craft")).toBe("2 × Invented 🌿 Herb — 37c each");
   expect(value("AH Snapshot (UTC)")).toBe(book.auctionsUpdatedAt ?? "");
   expect(value("Output Minimum")).toBe(1);
@@ -413,7 +420,9 @@ test("price columns and linked material text stay literal in Sheets, CSV and XLS
   expect(table.itemLists?.[0]?.items[0]?.text).toBe(
     String(value("Materials per Craft")),
   );
-  expect(toCsv(table.rows)).toContain("74c");
+  // CSV has no number formats, so it carries the coin text instead.
+  expect(toCsv(displayRows(table))).toContain('"10s 00c","8"');
+  expect(toCsv(displayRows(table))).toContain('"74c"');
   const body = JSON.stringify(sheetRequests(tables, []));
   expect(body).toContain("wowhead.com/forever/item=7002");
   expect(body).toContain("37c each");
@@ -425,7 +434,7 @@ test("price columns and linked material text stay literal in Sheets, CSV and XLS
   const files = unzipSync(toXlsx(tables));
   expect(
     strFromU8(files["xl/worksheets/sheet3.xml"] ?? new Uint8Array()),
-  ).toContain("74c");
+  ).toMatch(/t="n"><v>74<\/v>/);
   expect(
     Object.values(files)
       .map((file) => strFromU8(file))
@@ -451,7 +460,8 @@ test("Hyjal AH links the crafted item for the configured market in Sheets and XL
     table = tables.find((t) => t.name === "Recipes");
   if (!table) throw new Error("fixture");
   const column = table.rows[0]?.indexOf("Hyjal AH") ?? -1;
-  expect(table.rows[0]?.[column - 1]).toBe("Output AH / Item");
+  expect(table.rows[0]?.[column - 2]).toBe("Output AH / Item");
+  expect(table.rows[0]?.[column - 1]).toBe("Output Listed");
   expect(table.rows[0]?.[column + 1]).toBe("Materials AH / Craft");
   const outputId =
     table.rows[1]?.[table.rows[0]?.indexOf("Output Item ID") ?? -1];
@@ -558,7 +568,11 @@ test("margin per craft uses the yield range, colors only an unambiguous gain or 
     recipes = tables.find((t) => t.name === "Recipes");
   if (!recipes) throw new Error("fixture");
   const column = recipes.rows[0]?.indexOf("AH Margin / Craft") ?? -1;
-  expect(recipes.rows[1]?.[column]).toBe("−24c to +76c");
+  // The range sorts by its low end; the format renders the whole range.
+  expect(recipes.rows[1]?.[column]).toBe(-24);
+  expect(validatedMoney(recipes)).toContainEqual(
+    expect.objectContaining({ row: 1, column, text: "−24c to +76c" }),
+  );
   expect(recipes.tones ?? []).toEqual([]);
   const gainTables = buildTables(current),
     gain = gainTables.find((t) => t.name === "Recipes");
@@ -594,12 +608,17 @@ test("margin per craft uses the yield range, colors only an unambiguous gain or 
   const sheet = strFromU8(
     files["xl/worksheets/sheet3.xml"] ?? new Uint8Array(),
   );
-  const cell = sheet.match(
-    /<c r="[A-Z]+2" s="(\d+)" t="inlineStr"><is><t xml:space="preserve">\+9s 26c to \+29s 26c<\/t>/,
-  );
+  const cell = sheet.match(/<c r="[A-Z]+2" s="(\d+)" t="n"><v>926<\/v>/);
   const xfs = [
-    ...styles.matchAll(/<xf numFmtId="0" fontId="\d+" fillId="(\d+)"/g),
-  ].map((m) => Number(m[1]));
+    ...styles.matchAll(/<xf numFmtId="(\d+)" fontId="\d+" fillId="(\d+)"/g),
+  ].map((m) => Number(m[2]));
+  const formats = [
+    ...styles.matchAll(/<xf numFmtId="(\d+)" fontId="\d+" fillId="\d+"/g),
+  ].map((m) => m[1]);
+  const format = formats[Number(cell?.[1]) + 1];
+  expect(styles).toContain(
+    `<numFmt numFmtId="${format}" formatCode="&quot;+&quot;0&quot;s &quot;00&quot;c&quot;&quot; to +29s 26c&quot;;&quot;−&quot;0&quot;s &quot;00&quot;c&quot;&quot; to +29s 26c&quot;"/>`,
+  );
   const fills = [...styles.matchAll(/<fill>(.*?)<\/fill>/g)].map((m) => m[1]);
   // cellXfs follow the single cellStyleXfs entry.
   const fill = fills[xfs[Number(cell?.[1]) + 1] ?? -1];
@@ -663,8 +682,95 @@ test("margin subtracts only the configured sale cut from output value, and Guild
 });
 
 test("margins display whole copper, and sub-copper results count as break-even", () => {
-  expect(signedMoney(-54.3)).toBe("−54c");
-  expect(signedMoney(193.55)).toBe("+1s 94c");
-  expect(signedMoney(0.4)).toBe("±0c");
-  expect(signedMoney(-0.4)).toBe("±0c");
+  const signed = (copper: number) => moneyDisplay(copper, { signed: true });
+  expect(signed(-54.3)).toEqual({ pattern: '"+"0"c";"−"0"c"', text: "−54c" });
+  expect(signed(193.55).text).toBe("+1s 94c");
+  expect(signed(0.4).text).toBe("±0c");
+  expect(signed(-0.4)).toEqual({
+    pattern: '"±0c";"±0c";"±0c"',
+    text: "±0c",
+  });
+  // The gold pattern splits one integer into coin groups: 1234567c = 123g 45s 67c.
+  expect(moneyDisplay(1234567)).toEqual({
+    pattern: '0"g "00"s "00"c"',
+    text: "123g 45s 67c",
+  });
+  for (const bad of [Number.NaN, -1, Number.POSITIVE_INFINITY])
+    expect(() => moneyDisplay(bad)).toThrow();
+  expect(() => moneyDisplay(5, { signed: true, upperCopper: 1 })).toThrow();
+});
+
+test("Sheets writes raw copper with a coin number format and clears stale formats in money columns", async () => {
+  const current = await refreshAuctionPrices(
+    input(),
+    { auctionPrices: async () => book },
+    undefined,
+    now,
+  );
+  const tables = buildTables(current),
+    recipes = tables.find((t) => t.name === "Recipes");
+  if (!recipes) throw new Error("fixture");
+  const header = recipes.rows[0] ?? [];
+  const requests = sheetRequests(tables, []) as {
+    updateCells?: {
+      start?: { columnIndex: number };
+      fields: string;
+      rows: {
+        values: {
+          userEnteredValue?: unknown;
+          userEnteredFormat?: { numberFormat?: unknown };
+        }[];
+      }[];
+    };
+  }[];
+  const values = requests.find(
+    (r) =>
+      r.updateCells?.fields === "userEnteredValue,textFormatRuns" &&
+      r.updateCells.rows[0]?.values.some(
+        (v) =>
+          JSON.stringify(v.userEnteredValue) ===
+          JSON.stringify({ stringValue: "Output AH / Item" }),
+      ),
+  )?.updateCells;
+  const outputColumn = header.indexOf("Output AH / Item");
+  expect(values?.rows[1]?.values[outputColumn]?.userEnteredValue).toEqual({
+    numberValue: 1000,
+  });
+  const formatFor = (name: string) =>
+    requests.find(
+      (r) =>
+        r.updateCells?.start?.columnIndex === header.indexOf(name) &&
+        r.updateCells.fields === "userEnteredFormat.numberFormat",
+    )?.updateCells?.rows[0]?.values[0];
+  expect(formatFor("Output AH / Item")).toEqual({
+    userEnteredFormat: {
+      numberFormat: { type: "NUMBER", pattern: '0"s "00"c"' },
+    },
+  });
+  expect(
+    formatFor("AH Margin / Craft")?.userEnteredFormat?.numberFormat,
+  ).toEqual({
+    type: "NUMBER",
+    pattern: '"+"0"s "00"c"" to +29s 26c";"−"0"s "00"c"" to +29s 26c"',
+  });
+  // Unknown prices stay text and get an explicit empty format, clearing old patterns.
+  const unknown = buildTables({ ...current, auctionPrices: undefined });
+  const unknownRecipes = unknown.find((t) => t.name === "Recipes");
+  expect(unknownRecipes?.rows[1]?.[outputColumn]).toBe("Unknown");
+  const cleared = (sheetRequests(unknown, []) as typeof requests).find(
+    (r) =>
+      r.updateCells?.start?.columnIndex === outputColumn &&
+      r.updateCells.fields === "userEnteredFormat.numberFormat",
+  );
+  expect(cleared?.updateCells?.rows[0]?.values[0]).toEqual({});
+  // A forged annotation on a text cell or non-money column is ignored.
+  expect(
+    validatedMoney({
+      ...recipes,
+      money: [
+        { row: 1, column: header.indexOf("Recipe") },
+        { row: 1, column: outputColumn, upperCopper: 5 },
+      ],
+    }),
+  ).toEqual([]);
 });
