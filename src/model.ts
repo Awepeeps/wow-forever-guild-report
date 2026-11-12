@@ -262,6 +262,43 @@ const recipeDetailsIndexSchema = z
         ([id, entry]) => !entry.data || String(entry.data.id) === id,
       ),
   );
+// Vendor sell price per item in copper, from the static Forever item API.
+// Omitted is unknown; 0 means Blizzard reports no vendor sell price.
+export const itemVendorSchema = z
+  .object({
+    id: itemIdSchema,
+    sellCopper: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
+  })
+  .strict();
+export type ItemVendor = z.infer<typeof itemVendorSchema>;
+const itemVendorEntrySchema = z
+  .object({
+    status: z.enum(["ok", "unavailable", "error"]),
+    attemptedAt: z.iso.datetime(),
+    fetchedAt: z.iso.datetime().nullable(),
+    data: itemVendorSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (entry) =>
+      entry.status !== "ok" ||
+      (entry.data !== undefined && entry.fetchedAt !== null),
+  );
+export type ItemVendorEntry = z.infer<typeof itemVendorEntrySchema>;
+const itemVendorIndexSchema = z
+  .record(z.string().regex(/^[1-9]\d{0,9}$/), itemVendorEntrySchema)
+  .refine(
+    (entries) =>
+      Object.keys(entries).length <= 20_000 &&
+      Object.entries(entries).every(
+        ([id, entry]) => !entry.data || String(entry.data.id) === id,
+      ),
+  );
 export const auctionBookSchema = z
   .object({
     auctionsUpdatedAt: z.iso.datetime().nullable(),
@@ -304,6 +341,7 @@ export const snapshotSchema = z
     guildRankNames: guildRankNamesSchema,
     recipeMapping: recipeMappingSchema.optional(),
     recipeDetails: recipeDetailsIndexSchema.optional(),
+    itemVendor: itemVendorIndexSchema.optional(),
     auctionMarket: auctionMarketSchema.optional(),
     auctionPrices: auctionPricesSchema.optional(),
     rows: z.array(rowSchema).max(2_000),

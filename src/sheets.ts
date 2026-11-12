@@ -17,7 +17,7 @@ import {
   toneStyles,
 } from "./presentation.ts";
 import {
-  marginHeader,
+  marginHeaders,
   moneyHeaders,
   type Table,
   validatedMoney,
@@ -300,7 +300,9 @@ export function sheetRequests(
     const columns = table.rows[0]?.length ?? 1;
     const frozenColumnCount = ["Characters", "Professions"].includes(title)
       ? 2
-      : 0;
+      : title === "Recipes"
+        ? 1
+        : 0;
     const noteColumn = ["Characters", "Professions"].includes(title)
       ? (table.rows[0]?.findIndex(isPlayerNotesHeader) ?? -1)
       : -1;
@@ -464,10 +466,14 @@ export function sheetRequests(
             },
           });
       // Rewrite every margin cell's format so stale colors never survive a row shift.
-      const marginColumn = table.rows[0]?.indexOf(marginHeader) ?? -1;
-      if (marginColumn >= 0) {
+      const validTones = validatedTones(table);
+      for (const header of marginHeaders) {
+        const marginColumn = table.rows[0]?.indexOf(header) ?? -1;
+        if (marginColumn < 0) continue;
         const tones = new Map(
-          validatedTones(table).map((t) => [t.row, t.tone]),
+          validTones
+            .filter((t) => t.column === marginColumn)
+            .map((t) => [t.row, t.tone]),
         );
         requests.push({
           updateCells: {

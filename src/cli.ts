@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { refreshAuctionPrices } from "./auctions.ts";
 import { BlizzardClient } from "./blizzard.ts";
-import { refreshRecipeDetails } from "./crafting.ts";
+import { refreshItemVendorPrices, refreshRecipeDetails } from "./crafting.ts";
 import { atomicWrite, readJson, writeExports } from "./files.ts";
 import { ApiError, SafeError } from "./http.ts";
 import { importCsv } from "./import.ts";
@@ -190,6 +190,7 @@ async function main(): Promise<void> {
     snapshot = await refreshRoster(config, map, client, new Date(), previous);
     if (recipeMapping) snapshot = withRecipeMapping(snapshot, recipeMapping);
     snapshot = await refreshRecipeDetails(snapshot, client, previous);
+    snapshot = await refreshItemVendorPrices(snapshot, client, previous);
     snapshot = await refreshAuctionPrices(snapshot, client, previous);
   }
   if (recipeMapping) snapshot = withRecipeMapping(snapshot, recipeMapping);
@@ -205,8 +206,12 @@ async function main(): Promise<void> {
   const metadataFailures = metadataEntries.filter(
     (entry) => entry.status !== "ok",
   ).length;
+  const vendorEntries = Object.values(snapshot.itemVendor ?? {});
+  const vendorFailures = vendorEntries.filter(
+    (entry) => entry.status !== "ok",
+  ).length;
   console.log(
-    `Exported ${snapshot.rows.length} characters; ${incomplete} with incomplete API data. Recipe details: ${metadataEntries.length - metadataFailures} successful responses, ${metadataFailures} unavailable or retained. CSV, roster.xlsx, snapshot.json written.`,
+    `Exported ${snapshot.rows.length} characters; ${incomplete} with incomplete API data. Recipe details: ${metadataEntries.length - metadataFailures} successful responses, ${metadataFailures} unavailable or retained. Vendor prices: ${vendorEntries.length - vendorFailures} successful, ${vendorFailures} unavailable or retained. CSV, roster.xlsx, snapshot.json written.`,
   );
   if (snapshot.auctionMarket)
     console.log(
@@ -216,6 +221,7 @@ async function main(): Promise<void> {
     command === "refresh" &&
     (incomplete ||
       metadataFailures ||
+      vendorFailures ||
       (snapshot.auctionMarket && snapshot.auctionPrices?.status !== "ok"))
   )
     process.exitCode = 2;

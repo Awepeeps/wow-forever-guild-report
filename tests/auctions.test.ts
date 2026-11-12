@@ -243,7 +243,7 @@ test("price refresh retains only recipe items, clears successful missing listing
   );
   // Unknown price cells are blank, so AH Data must say why each is unknown.
   expect(recipePrices(missing, details).status).toMatch(
-    /; output: no buyout listings; materials: missing buyout prices$/,
+    /; output: no buyout listings; materials: missing buyout prices; vendor: not fetched$/,
   );
   const missingRecipes = buildTables(missing).find((t) => t.name === "Recipes");
   const missingValue = (header: string) =>
@@ -347,7 +347,7 @@ test("recipe costs distinguish missing data, actual zero reagents, insufficient 
     outputQuantity: 8,
     materialCost: "74c",
     materialCopper: 74,
-    status: "Snapshot",
+    status: "Snapshot; vendor: not fetched",
   });
   expect(recipePrices(current, undefined).materialCost).toBe("Unknown");
   expect(
@@ -810,4 +810,115 @@ test("Sheets writes raw copper with a coin number format and clears stale format
       ],
     }),
   ).toEqual([]);
+});
+
+test("vendor margin compares the output's vendor sell price with AH materials, keeps unknowns blank and colors gains/losses", async () => {
+  const current = await refreshAuctionPrices(
+    input(),
+    { auctionPrices: async () => book },
+    undefined,
+    now,
+  );
+  const at = now.toISOString();
+  const vendor = (
+    sellCopper: number | undefined,
+    status: "ok" | "error" = "ok",
+  ) => ({
+    ...current,
+    itemVendor: {
+      "7001": {
+        status,
+        attemptedAt: at,
+        fetchedAt: at,
+        data: {
+          id: 7001,
+          ...(sellCopper === undefined ? {} : { sellCopper }),
+        },
+      },
+    },
+  });
+  // 100c × 1–3 yield minus 2 × 37c AH materials; no auction cut applies.
+  expect(recipePrices(vendor(100), details)).toMatchObject({
+    vendorCopper: 100,
+    vendorMarginCopper: 26,
+    vendorMarginHighCopper: 226,
+    vendorTone: "gain",
+    status: "Snapshot",
+  });
+  expect(recipePrices(vendor(20), details)).toMatchObject({
+    vendorMarginCopper: -54,
+    vendorMarginHighCopper: -14,
+    vendorTone: "loss",
+  });
+  // 0 means Blizzard reports no vendor sell price: no margin, never "−74c".
+  const unsellable = recipePrices(vendor(0), details);
+  expect(unsellable.vendorMarginCopper).toBeUndefined();
+  expect(unsellable.status).toContain("vendor: no sell price");
+  expect(recipePrices(vendor(undefined), details).status).toContain(
+    "vendor: price unknown",
+  );
+  const retained = recipePrices(vendor(100, "error"), details);
+  expect(retained.vendorMarginCopper).toBe(26);
+  expect(retained.status).toContain("vendor: retained price — refresh failed");
+  // Without AH materials there is nothing to compare against.
+  const { auctionMarket: _m, auctionPrices: _p, ...base } = vendor(100);
+  expect(recipePrices(base, details).vendorMarginCopper).toBeUndefined();
+
+  const tables = buildTables(vendor(100)),
+    recipes = tables.find((t) => t.name === "Recipes");
+  if (!recipes) throw new Error("fixture");
+  const header = recipes.rows[0] ?? [];
+  const column = header.indexOf("Vendor Margin / Craft");
+  expect(header[column - 1]).toBe("AH Margin / Craft");
+  expect(recipes.rows[1]?.[column]).toBe(26);
+  expect(validatedMoney(recipes)).toContainEqual(
+    expect.objectContaining({ row: 1, column, text: "+26c to +2s 26c" }),
+  );
+  expect(recipes.tones).toContainEqual({ row: 1, column, tone: "gain" });
+  const requests = sheetRequests(tables, []) as {
+    updateCells?: {
+      start?: { columnIndex: number };
+      fields: string;
+      rows: {
+        values: { userEnteredFormat?: { backgroundColor?: unknown } }[];
+      }[];
+    };
+  }[];
+  const toned = requests.find(
+    (r) =>
+      r.updateCells?.start?.columnIndex === column &&
+      r.updateCells.fields === "userEnteredFormat",
+  );
+  expect(
+    toned?.updateCells?.rows[0]?.values[0]?.userEnteredFormat?.backgroundColor,
+  ).toEqual({ red: 0xe6 / 255, green: 0xf4 / 255, blue: 0xea / 255 });
+  const unknown = buildTables(vendor(0)).find((t) => t.name === "Recipes");
+  expect(unknown?.rows[1]?.[column]).toBe("");
+});
+
+test("Recipes leads with Recipe, Profession, Makes and freezes the recipe column in Sheets and XLSX", async () => {
+  const current = await refreshAuctionPrices(
+    input(),
+    { auctionPrices: async () => book },
+    undefined,
+    now,
+  );
+  const tables = buildTables(current),
+    recipes = tables.find((t) => t.name === "Recipes");
+  expect(recipes?.rows[0]?.slice(0, 3)).toEqual([
+    "Recipe",
+    "Profession",
+    "Makes",
+  ]);
+  expect(recipes?.rows[1]?.slice(0, 2)).toEqual(["Invented Tonic", "Alchemy"]);
+  const requests = JSON.stringify(sheetRequests(tables, []));
+  const recipesSheet = requests.match(
+    /"title":"Recipes"[^}]*"gridProperties":\{[^}]*\}/,
+  )?.[0];
+  expect(recipesSheet).toContain('"frozenColumnCount":1');
+  const files = unzipSync(toXlsx(tables));
+  const sheet = strFromU8(
+    files["xl/worksheets/sheet3.xml"] ?? new Uint8Array(),
+  );
+  expect(sheet).toContain('<pane xSplit="1" ySplit="1" topLeftCell="B2"');
 });

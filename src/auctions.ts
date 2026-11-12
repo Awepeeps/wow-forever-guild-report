@@ -179,6 +179,31 @@ export function moneyDisplay(
   return { pattern, text: `${signedText(copper)}${suffix}` };
 }
 
+type Tone = "gain" | "loss";
+
+/**
+ * Per-craft margin: per-item value × reported yield minus material cost. A
+ * variable yield gives a range, colored only when both ends agree. Rounds as
+ * the displayed whole copper does (half away from zero), so −1c is a loss.
+ */
+function craftMargin(
+  unitValue: number,
+  quantity: { min: number; max: number },
+  materialCopper: number,
+): { low: number; high: number; tone?: Tone } | undefined {
+  const low = unitValue * quantity.min - materialCopper,
+    high = unitValue * quantity.max - materialCopper;
+  if (
+    Math.abs(low) > Number.MAX_SAFE_INTEGER ||
+    Math.abs(high) > Number.MAX_SAFE_INTEGER
+  )
+    return undefined;
+  const shown = (copper: number) =>
+    Math.sign(copper) * Math.round(Math.abs(copper));
+  const tone = shown(low) > 0 ? "gain" : shown(high) < 0 ? "loss" : undefined;
+  return { low, high, ...(tone ? { tone } : {}) };
+}
+
 export function recipePrices(
   snapshot: Snapshot,
   details: RecipeDetails | undefined,
@@ -191,7 +216,11 @@ export function recipePrices(
   margin: string;
   marginCopper?: number;
   marginHighCopper?: number;
-  tone?: "gain" | "loss";
+  tone?: Tone;
+  vendorCopper?: number;
+  vendorMarginCopper?: number;
+  vendorMarginHighCopper?: number;
+  vendorTone?: Tone;
   status: string;
 } {
   const data = snapshot.auctionPrices?.data;
@@ -226,30 +255,29 @@ export function recipePrices(
   // Margin per craft: output value at the reported yield, after the configured
   // sale cut, minus material cost. Deposits are refunded on sale, so excluded.
   // A variable yield gives a range; it is only colored when both ends agree.
-  let margin = "Unknown";
-  let marginCopper: number | undefined;
-  let marginHighCopper: number | undefined;
-  let tone: "gain" | "loss" | undefined;
-  if (output && materialCopper !== undefined && details?.quantity) {
-    const net =
-      output.unitCopper *
-      (1 - (snapshot.auctionMarket?.saleCutPercent ?? 0) / 100);
-    const low = net * details.quantity.min - materialCopper,
-      high = net * details.quantity.max - materialCopper;
-    if (
-      Math.abs(low) <= Number.MAX_SAFE_INTEGER &&
-      Math.abs(high) <= Number.MAX_SAFE_INTEGER
-    ) {
-      marginCopper = low;
-      marginHighCopper = high;
-      margin = moneyDisplay(low, { signed: true, upperCopper: high }).text;
-      // Round as the displayed whole copper does (half away from zero), so a
-      // margin shown as −1c is never left uncolored.
-      const shown = (copper: number) =>
-        Math.sign(copper) * Math.round(Math.abs(copper));
-      tone = shown(low) > 0 ? "gain" : shown(high) < 0 ? "loss" : undefined;
-    }
-  }
+  const ah =
+    output && materialCopper !== undefined && details?.quantity
+      ? craftMargin(
+          output.unitCopper *
+            (1 - (snapshot.auctionMarket?.saleCutPercent ?? 0) / 100),
+          details.quantity,
+          materialCopper,
+        )
+      : undefined;
+  const margin = ah
+    ? moneyDisplay(ah.low, { signed: true, upperCopper: ah.high }).text
+    : "Unknown";
+  // Vendor margin per craft: the output's vendor sell price (no auction cut or
+  // deposit) × reported yield, minus the same AH material cost. 0 means
+  // Blizzard reports no vendor sell price, so no margin is shown.
+  const vendorEntry = details?.output
+    ? snapshot.itemVendor?.[String(details.output.id)]
+    : undefined;
+  const vendorCopper = vendorEntry?.data?.sellCopper;
+  const vendor =
+    vendorCopper && materialCopper !== undefined && details?.quantity
+      ? craftMargin(vendorCopper, details.quantity, materialCopper)
+      : undefined;
   // Unknown price cells are left blank so they sort last in either direction;
   // the reason each is unknown is spelled out in the AH Data status instead.
   const reasons: string[] = [];
@@ -264,10 +292,23 @@ export function recipePrices(
           ? "materials: unknown"
           : `materials: ${materialCost.toLowerCase()}`,
       );
-    if (output && materialCopper !== undefined && marginCopper === undefined)
+    if (output && materialCopper !== undefined && details?.quantity && !ah)
+      reasons.push("margin: out of range");
+  }
+  if (details?.output) {
+    // Both margins need the reported yield.
+    if (!details.quantity) reasons.push("margin: yield unknown");
+    if (vendorCopper === 0) reasons.push("vendor: no sell price");
+    else if (vendorCopper === undefined)
       reasons.push(
-        details?.quantity ? "margin: out of range" : "margin: yield unknown",
+        vendorEntry?.status === "unavailable"
+          ? "vendor: price unavailable"
+          : vendorEntry
+            ? "vendor: price unknown"
+            : "vendor: not fetched",
       );
+    else if (vendorEntry?.status !== "ok")
+      reasons.push("vendor: retained price — refresh failed");
   }
   const status = auctionStatus(snapshot);
   return {
@@ -283,9 +324,13 @@ export function recipePrices(
       ? { outputQuantity: output?.quantity ?? 0 }
       : {}),
     margin,
-    ...(marginCopper !== undefined ? { marginCopper } : {}),
-    ...(marginHighCopper !== undefined ? { marginHighCopper } : {}),
-    ...(tone ? { tone } : {}),
+    ...(ah ? { marginCopper: ah.low, marginHighCopper: ah.high } : {}),
+    ...(ah?.tone ? { tone: ah.tone } : {}),
+    ...(vendorCopper !== undefined ? { vendorCopper } : {}),
+    ...(vendor
+      ? { vendorMarginCopper: vendor.low, vendorMarginHighCopper: vendor.high }
+      : {}),
+    ...(vendor?.tone ? { vendorTone: vendor.tone } : {}),
     status: reasons.length ? `${status}; ${reasons.join("; ")}` : status,
   };
 }
