@@ -18,6 +18,7 @@ import {
 import {
   armoryUrl,
   guildArmoryUrl,
+  hyjalItemUrl,
   type ItemLinkList,
   itemUrl,
   type PublicLink,
@@ -47,6 +48,7 @@ import { knowerChunks, knownRecipes, recipeCoverage } from "./recipes.ts";
 
 export type Cell = string | number;
 export const marginHeader = "AH Margin / Craft";
+export const hyjalHeader = "Hyjal AH";
 /** Green/red emphasis for a signed value; never the only signal (text keeps its sign). */
 export interface CellTone {
   row: number;
@@ -134,19 +136,17 @@ export function buildTables(snapshot: Snapshot): Table[] {
     const c = row.character;
     const failed = (status: string) =>
       status === "unavailable" || status === "error";
+    // Failed components are cleared at refresh, so only configured values
+    // remain; discovery fields (class, level, rank) are not profile detail.
     const characterRetained =
       (failed(row.profileStatus) &&
-        (row.profileFetchedAt !== null ||
-          [c.class, c.race, c.faction, c.ruleset].some(Boolean) ||
-          [
-            c.level,
-            c.equippedItemLevel,
-            c.averageItemLevel,
-            c.achievementPoints,
-            c.lastLoginAt,
-          ].some((v) => v !== undefined))) ||
-      (failed(row.talentStatus) &&
-        (row.talentFetchedAt !== null || c.talents.length > 0));
+        [
+          c.equippedItemLevel,
+          c.averageItemLevel,
+          c.achievementPoints,
+          c.lastLoginAt,
+        ].some((v) => v !== undefined)) ||
+      (failed(row.talentStatus) && c.talents.length > 0);
     characters.push([
       row.discord,
       c.name,
@@ -246,6 +246,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Recipe Details",
       "Knower Data",
       "Output AH / Item",
+      hyjalHeader,
       "Materials AH / Craft",
       marginHeader,
       "AH Data",
@@ -271,6 +272,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
       "Auctions Updated (UTC)",
       "Commodities Updated (UTC)",
       "Recipe URL",
+      "Hyjal URL",
     ],
   ];
   for (const recipe of recipeEntries) {
@@ -298,6 +300,16 @@ export function buildTables(snapshot: Snapshot): Table[] {
         })) ?? [];
       if (output)
         craftedItemLinks.push({ row, column: 2, url: itemUrl(output.id) });
+      const hyjal =
+        output && snapshot.auctionMarket
+          ? hyjalItemUrl(snapshot.region, snapshot.auctionMarket, output.id)
+          : undefined;
+      if (hyjal)
+        craftedItemLinks.push({
+          row,
+          column: recipes[0]?.indexOf(hyjalHeader) ?? -1,
+          url: hyjal,
+        });
       if (materials.length)
         recipeItemLists.push({ row, column: 3, items: materials });
       recipes.push([
@@ -311,6 +323,13 @@ export function buildTables(snapshot: Snapshot): Table[] {
         recipeDetailStatus(details),
         status,
         snapshot.auctionMarket ? prices.output : "Not configured",
+        hyjal
+          ? "View on Hyjal"
+          : !snapshot.auctionMarket
+            ? "Not configured"
+            : output
+              ? "No Hyjal market"
+              : "Output unknown",
         snapshot.auctionMarket ? prices.materialCost : "Not configured",
         snapshot.auctionMarket ? prices.margin : "Not configured",
         prices.status,
@@ -337,6 +356,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
         snapshot.auctionPrices?.data?.auctionsUpdatedAt ?? "",
         snapshot.auctionPrices?.data?.commoditiesUpdatedAt ?? "",
         spellId === undefined ? "" : recipeUrl(spellId),
+        hyjal ?? "",
       ]);
     }
   }
@@ -464,7 +484,7 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ["Report a problem", upstreamIssuesUrl],
     [
       "Refreshing this workbook",
-      "Run just refresh with the private guild config and output directory to refresh local exports; exit 2 means partial data was retained. Publishing to Google Sheets is a separate, explicitly requested just sheets step. Check Guild Info for last refresh and API coverage. Do not attach private rosters, notes, credentials or exports to a public issue.",
+      "Run just refresh with the private guild config and output directory to refresh local exports; exit 2 means some API data was unavailable (failed components are blanked and labelled). Publishing to Google Sheets is a separate, explicitly requested just sheets step. Check Guild Info for last refresh and API coverage. Do not attach private rosters, notes, credentials or exports to a public issue.",
     ],
     [
       "Layout",
@@ -513,11 +533,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Character metrics",
-      "iLvl is equipped item level; Average ilvl is hidden. Blank means unknown. A successful profile omitting a metric clears it; a failed profile retains prior values and last-success time. Sheets Last Login requires the validated en_US spreadsheet locale and shows Today/1 day ago/N days ago with a trusted DATE/TODAY formula in the spreadsheet timezone; unsupported locales stop before writing. Hourly-or-faster recalculation keeps the age current. The exact Blizzard UTC timestamp is hidden and can lag. XLSX/CSV Last Login (at export) is static at Generated At, using UTC calendar dates. Age recalculation does not fetch new Blizzard data.",
+      "iLvl is equipped item level; Average ilvl is hidden. Blank means unknown. A successful profile omitting a metric clears it; a failed profile, talent or profession request also clears the values that endpoint owns instead of showing them stale (hidden last-success times remain). Sheets Last Login requires the validated en_US spreadsheet locale and shows Today/1 day ago/N days ago with a trusted DATE/TODAY formula in the spreadsheet timezone; unsupported locales stop before writing. Hourly-or-faster recalculation keeps the age current. The exact Blizzard UTC timestamp is hidden and can lag. XLSX/CSV Last Login (at export) is static at Generated At, using UTC calendar dates. Age recalculation does not fetch new Blizzard data.",
     ],
     [
       "Recipes",
-      "Recipes lists profession, recipe and known characters (with Discord), sorted by profession then recipe. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests retain known recipes with per-character last-success labels. Successful responses omitting recipe lists retain only the same profession/tier knowledge and its original recipe-specific timestamp; explicit empty lists clear it. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
+      "Recipes lists profession, recipe and known characters (with Discord), sorted by profession then recipe. Knower Data describes only the listed knowers, not guild-wide coverage. IDs distinguish recipes with the same name. Duplicate tiers do not repeat a knower. Failed profession requests remove that character's recipe knowledge until a later refresh succeeds. Successful responses omitting recipe lists retain only the same profession/tier knowledge and its original recipe-specific timestamp; explicit empty lists clear it. Missing recipe arrays mean unknown coverage; empty arrays mean no recipes reported for that tier. A successful response with no professions counts as current empty knowledge. Large knower lists continue on the next row; XLSX row heights are capped, so inspect the full cell text for unusually long lists. This is a knowledge index, not a catalogue of recipes nobody knows.",
     ],
     [
       "Recipe materials and output",
@@ -529,11 +549,11 @@ export function buildTables(snapshot: Snapshot): Table[] {
     ],
     [
       "Auction prices",
-      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; output prices also show buyout quantity listed. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield, less the configured auction house cut (see AH Margin Basis on Guild Info), minus Materials AH / Craft; a range for variable yields. Listing deposits are excluded because they are refunded on sale but lost if the auction expires. It is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times, fetch diagnostics and numeric copper values are hidden/available in CSV. Item-ID matching does not distinguish random bonuses.",
+      "Auction prices require an explicitly configured market corroborated against in-game listings. Output prices and linked material lines show lowest buyout per item; output prices also show buyout quantity listed. Materials AH / Craft is a lowest-unit-price estimate, not an order-book quote: enough total stock does not guarantee every unit at the minimum price. Missing prices or insufficient stock prevent a total. AH Margin / Craft is output lowest buyout × reported yield, less the configured auction house cut (see AH Margin Basis on Guild Info), minus Materials AH / Craft; a range for variable yields. Listing deposits are excluded because they are refunded on sale but lost if the auction expires. It is not a sale guarantee. Green means a gain and red a loss across the whole range; the signed text carries the same meaning, and unknown margins stay uncolored. No vendor prices, fees, sales or other markets are substituted. AH Data marks retained/old snapshots; AH Snapshot (UTC) is the older of Blizzard's two Last-Modified times, not the export time. Missing source times stay unknown. Full source times, fetch diagnostics and numeric copper values are hidden/available in CSV. Item-ID matching does not distinguish random bonuses. Hyjal AH opens the crafted item's page on hyjal.cc, an independent third-party auction browser, for the same region, ruleset and faction market; its listings may be refreshed on a different schedule than this export.",
     ],
     [
       "Public links",
-      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open exact Wowhead Forever crafting spell pages using a build-pinned SkillLineAbility.ID → Spell table from wago.tools. Blizzard recipe IDs are never treated as spell IDs or matched by name. Unmapped recipes have no link and are labelled for a mapping update; no search links are substituted. Guild Info records the mapping build, source hash and fetch time. Hidden spell-ID/URL columns keep targets in CSV. Source code (upstream) links to the public GitHub repository that generates this export; Report a problem opens its issues page. Hyperlinks are restricted to the approved HTTPS Armory/Wowhead routes and those exact repository/issues links; arbitrary API URLs are never emitted. Only Sheets Last Login uses the fixed generated relative-date formula; raw data stays literal.",
+      "Character names open the official realmless Forever Armory (talents are on the main character page). Recipe names open exact Wowhead Forever crafting spell pages using a build-pinned SkillLineAbility.ID → Spell table from wago.tools. Blizzard recipe IDs are never treated as spell IDs or matched by name. Unmapped recipes have no link and are labelled for a mapping update; no search links are substituted. Guild Info records the mapping build, source hash and fetch time. Hidden spell-ID/URL columns keep targets in CSV. Source code (upstream) links to the public GitHub repository that generates this export; Report a problem opens its issues page. Hyjal AH links use hyjal.cc's fixed region/market/faction/item route built from the crafted item ID and the configured market; unknown rulesets stay unlinked. Hyperlinks are restricted to the approved HTTPS Armory/Wowhead/Hyjal routes and those exact repository/issues links; arbitrary API URLs are never emitted. Only Sheets Last Login uses the fixed generated relative-date formula; raw data stays literal.",
     ],
     [
       "Forever API research (community; US routes verified 2026-11-07)",
@@ -569,13 +589,10 @@ export function buildTables(snapshot: Snapshot): Table[] {
       itemLists: recipeItemLists,
       tones: recipeTones,
       links: [
-        ...recipes
-          .slice(1)
-          .flatMap((row, i) =>
-            row.at(-1)
-              ? [{ row: i + 1, column: 1, url: String(row.at(-1)) }]
-              : [],
-          ),
+        ...recipes.slice(1).flatMap((row, i) => {
+          const url = row[recipes[0]?.indexOf("Recipe URL") ?? -1];
+          return url ? [{ row: i + 1, column: 1, url: String(url) }] : [];
+        }),
         ...craftedItemLinks,
       ],
     },

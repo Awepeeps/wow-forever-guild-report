@@ -89,16 +89,13 @@ test("omitted recipe lists retain the same tier's knowledge with its own timesta
     new Date("2026-11-09T16:00:00.000Z"),
     current,
   );
-  expect(failed.rows[0]?.character.primary[0]?.recipesFetchedAt).toBe(
-    now.toISOString(),
-  );
-  const failedRecipes = buildTables(failed)[2];
-  expect(
-    failedRecipes?.rows[1]?.[failedRecipes.rows[0]?.indexOf("Known By") ?? -1],
-  ).toContain(now.toISOString());
+  // A failed request clears earlier knowledge instead of showing it as current.
+  expect(failed.rows[0]?.character.primary).toEqual([]);
+  expect(failed.rows[0]?.professionFetchedAt).toBe(later.toISOString());
+  expect(buildTables(failed)[2]?.rows).toHaveLength(1);
 });
 
-test("failed components retain metrics/recipes and their success times, while successful omitted metrics become unknown", async () => {
+test("failed components clear earlier metrics/recipes but keep their last success times, and successful omitted metrics become unknown", async () => {
   const profile = {
     equippedItemLevel: 12,
     averageItemLevel: 15,
@@ -133,9 +130,21 @@ test("failed components retain metrics/recipes and their success times, while su
     later,
     previous,
   );
-  expect(result.rows[0]?.character).toMatchObject({ ...profile, primary });
+  for (const field of Object.keys(profile))
+    expect(result.rows[0]?.character).not.toHaveProperty(field);
+  expect(result.rows[0]?.character.primary).toEqual([]);
+  expect(result.rows[0]?.character.name).toBe("Example Priest");
   expect(result.rows[0]?.profileFetchedAt).toBe(now.toISOString());
   expect(result.rows[0]?.professionFetchedAt).toBe(now.toISOString());
+  const [characters, professions, recipes] = buildTables(result);
+  const cell = (table: typeof characters, header: string) =>
+    table?.rows[1]?.[table.rows[0]?.indexOf(header) ?? -1];
+  for (const header of ["Achievement Points", "iLvl", "Last Login"])
+    expect(cell(characters, header)).toBe("");
+  expect(cell(characters, "Character API Status")).toBe("Incomplete");
+  expect(cell(professions, "Primary Professions")).toBe("Unavailable");
+  expect(cell(professions, "Profession API Status")).toBe("Unavailable");
+  expect(recipes?.rows).toHaveLength(1);
   const successful = await refreshRoster(
     input,
     {},
@@ -157,7 +166,7 @@ test("failed components retain metrics/recipes and their success times, while su
 });
 
 describe("guild roster refresh", () => {
-  test("stable-ID renames retain enrichment and success times for guild and explicit discovery", async () => {
+  test("stable-ID renames keep success times and Discord for guild and explicit discovery, clearing failed enrichment", async () => {
     const priorConfig = configSchema.parse({
       ...config,
       characters: [{ slug: "old-name", name: "Old Name", id: "123" }],
@@ -198,12 +207,8 @@ describe("guild roster refresh", () => {
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0]?.character.slug).toBe("new-name");
       expect(result.rows[0]?.character.id).toBe("123");
-      expect(result.rows[0]?.character.primary).toEqual(
-        prior.rows[0]?.character.primary,
-      );
-      expect(result.rows[0]?.character.talents).toEqual(
-        prior.rows[0]?.character.talents,
-      );
+      expect(result.rows[0]?.character.primary).toEqual([]);
+      expect(result.rows[0]?.character.talents).toEqual([]);
       expect(result.rows[0]?.professionFetchedAt).toBe(now.toISOString());
       expect(result.rows[0]?.talentFetchedAt).toBe(now.toISOString());
       expect(result.rows[0]?.discord).toBe("same-person");
@@ -263,7 +268,7 @@ describe("guild roster refresh", () => {
     }
   });
 
-  test("ID upgrade retains a slug-only snapshot, and contradictory profile IDs abort", async () => {
+  test("ID upgrade matches a slug-only snapshot, and contradictory profile IDs abort", async () => {
     const current = characterSchema.parse({
       slug: "example-priest",
       name: "Example Priest",
@@ -272,16 +277,24 @@ describe("guild roster refresh", () => {
     const unavailable = async (): Promise<never> => {
       throw new ApiError("Blizzard API", 404);
     };
+    const slugOnly = await refreshRoster(
+      configSchema.parse({ ...config, characters: [] }),
+      {},
+      source({
+        guild: async () => [{ ...current, id: undefined }],
+        profile: async () => ({}),
+      }),
+      now,
+    );
     const result = await refreshRoster(
       configSchema.parse({ ...config, characters: [] }),
       {},
       source({ guild: async () => [current], professions: unavailable }),
-      now,
-      snapshot,
+      new Date(now.getTime() + 60_000),
+      slugOnly,
     );
-    expect(result.rows[0]?.character.primary).toEqual(
-      snapshot.rows[0]?.character.primary,
-    );
+    expect(result.rows[0]?.professionFetchedAt).toBe(now.toISOString());
+    expect(result.rows[0]?.character.primary).toEqual([]);
     expect(result.rows[0]?.character.id).toBe("123");
     await expect(
       refreshRoster(
@@ -339,7 +352,7 @@ describe("guild roster refresh", () => {
     ).rejects.toThrow("duplicate character identities");
   });
 
-  test("minimal explicit overrides retain last-good values when enrichment fails, with or without guild discovery", async () => {
+  test("minimal explicit overrides do not keep earlier enrichment when it fails, with or without guild discovery", async () => {
     for (const guild of ["example-guild", undefined]) {
       const initialConfig = configSchema.parse({
         version: 1,
@@ -373,15 +386,10 @@ describe("guild roster refresh", () => {
         later,
         prior,
       );
-      expect(result.rows[0]?.character.primary).toEqual(
-        prior.rows[0]?.character.primary,
-      );
-      expect(result.rows[0]?.character.secondary).toEqual(
-        prior.rows[0]?.character.secondary,
-      );
-      expect(result.rows[0]?.character.talents).toEqual(
-        prior.rows[0]?.character.talents,
-      );
+      expect(prior.rows[0]?.character.primary.length).toBeGreaterThan(0);
+      expect(result.rows[0]?.character.primary).toEqual([]);
+      expect(result.rows[0]?.character.secondary).toEqual([]);
+      expect(result.rows[0]?.character.talents).toEqual([]);
       expect(result.rows[0]?.character.class).toBe("Priest");
       expect(result.rows[0]?.profileFetchedAt).toBe(now.toISOString());
       expect(result.rows[0]?.professionFetchedAt).toBe(now.toISOString());
@@ -441,7 +449,7 @@ describe("guild roster refresh", () => {
     expect(result.rows[0]?.fetchedAt).toBe(now.toISOString());
     expect(snapshotSchema.safeParse(result).success).toBe(true);
   });
-  test("retains supplied values on 404 while updating independent components", async () => {
+  test("keeps explicitly configured values on 404 while updating independent components", async () => {
     const result = await refreshRoster(
       config,
       {},
@@ -457,9 +465,9 @@ describe("guild roster refresh", () => {
     expect(row?.professionStatus).toBe("unavailable");
     expect(row?.profileStatus).toBe("ok");
     expect(row?.character.level).toBe(17);
-    expect(row?.issue).toContain("retained");
+    expect(row?.issue).toContain("configured values kept");
   });
-  test("preserves last-good professions for guild members, removes departed members", async () => {
+  test("clears earlier professions for guild members on failure, removes departed members", async () => {
     const guildConfig = configSchema.parse({
       version: 1,
       region: "us",
@@ -478,14 +486,14 @@ describe("guild roster refresh", () => {
       },
     });
     const result = await refreshRoster(guildConfig, {}, api, now, snapshot);
-    expect(result.rows[0]?.character.primary[0]?.skill).toBe(50);
+    expect(result.rows[0]?.character.primary).toEqual([]);
     expect(result.rows[0]?.character.guildRank).toBe(1);
     expect(result.rows[0]?.professionStatus).toBe("error");
     expect(result.rows[0]?.professionFetchedAt).toBe(null);
     const empty = await refreshRoster(guildConfig, {}, source(), now, snapshot);
     expect(empty.rows).toHaveLength(0);
   });
-  test("character 403 retains the affected component while guild 403 and OAuth 403 abort", async () => {
+  test("character 403 keeps configured values for the affected component while guild 403 and OAuth 403 abort", async () => {
     const forbidden = async (): Promise<never> => {
       throw new ApiError("Blizzard API", 403);
     };
@@ -655,4 +663,119 @@ test("rank labels validate at config boundaries, survive snapshots, and ranks co
     "0": "Guild Master",
     "1": "Officer",
   });
+});
+
+test("clearing honours only the config entry merged into that character, never a reused slug", async () => {
+  const unavailable = async (): Promise<never> => {
+    throw new ApiError("Blizzard API", 404);
+  };
+  const renamed = characterSchema.parse({
+    slug: "jaina",
+    name: "Jaina",
+    id: "123",
+  });
+  const reused = characterSchema.parse({
+    slug: "thrall",
+    name: "Thrall",
+    id: "456",
+  });
+  const input = configSchema.parse({
+    ...config,
+    characters: [
+      {
+        slug: "thrall",
+        name: "Thrall",
+        id: "123",
+        primary: [{ name: "Alchemy", skill: 50, max: 75 }],
+        equippedItemLevel: 9,
+      },
+    ],
+  });
+  const guild = async () => [renamed, reused];
+  const prior = await refreshRoster(input, {}, source({ guild }), now);
+  const result = await refreshRoster(
+    input,
+    {},
+    source({
+      guild,
+      profile: unavailable,
+      professions: unavailable,
+      talents: unavailable,
+    }),
+    new Date(now.getTime() + 60_000),
+    prior,
+  );
+  const row = (id: string) => result.rows.find((r) => r.character.id === id);
+  expect(row("123")?.character.primary).toEqual([
+    { name: "Alchemy", skill: 50, max: 75 },
+  ]);
+  expect(row("123")?.character.equippedItemLevel).toBe(9);
+  expect(row("123")?.character.talents).toEqual([]);
+  expect(row("123")?.issue).toContain("configured values kept");
+  expect(row("123")?.issue).toMatch(/talents: [^.]*earlier refreshes\. /);
+  expect(
+    prior.rows.find((r) => r.character.id === "456")?.character.primary.length,
+  ).toBeGreaterThan(0);
+  expect(row("456")?.character.primary).toEqual([]);
+  expect(row("456")?.character.talents).toEqual([]);
+  expect(row("456")?.issue).not.toContain("configured values kept");
+});
+
+test("a character 403/5xx without an override clears its component but keeps discovery and market fields", async () => {
+  const member = characterSchema.parse({
+    slug: "example-priest",
+    name: "Example Priest",
+    id: "1",
+    guildRank: 2,
+    level: 20,
+    class: "Priest",
+  });
+  const input = configSchema.parse({ ...config, characters: [] });
+  const prior = await refreshRoster(
+    input,
+    {},
+    source({
+      guild: async () => [member],
+      profile: async () => ({
+        ruleset: "Roleplay",
+        faction: "Alliance",
+        race: "Human",
+        equippedItemLevel: 14,
+        lastLoginAt: "2026-11-06T12:00:00.000Z",
+      }),
+    }),
+    now,
+  );
+  for (const status of [403, 500]) {
+    const failing = async (): Promise<never> => {
+      throw new ApiError("Blizzard API", status);
+    };
+    const result = await refreshRoster(
+      input,
+      {},
+      source({
+        guild: async () => [member],
+        profile: failing,
+        professions: failing,
+        talents: failing,
+      }),
+      new Date(now.getTime() + 60_000),
+      prior,
+    );
+    const c = result.rows[0]?.character;
+    expect(c).toMatchObject({
+      ruleset: "Roleplay",
+      faction: "Alliance",
+      race: "Human",
+      level: 20,
+      class: "Priest",
+      guildRank: 2,
+      primary: [],
+      secondary: [],
+      talents: [],
+    });
+    expect(c?.equippedItemLevel).toBeUndefined();
+    expect(c?.lastLoginAt).toBeUndefined();
+    expect(result.rows[0]?.profileFetchedAt).toBe(now.toISOString());
+  }
 });

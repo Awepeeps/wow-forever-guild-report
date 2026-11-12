@@ -17,6 +17,7 @@ import {
   configSchema,
   snapshotSchema,
 } from "../src/model.ts";
+import { columnPresentation } from "../src/presentation.ts";
 import { sheetRequests } from "../src/sheets.ts";
 import { buildTables, toCsv, toXlsx } from "../src/workbook.ts";
 import { snapshot } from "./helpers.ts";
@@ -400,6 +401,9 @@ test("price columns and linked material text stay literal in Sheets, CSV and XLS
   const value = (header: string) =>
     table.rows[1]?.[table.rows[0]?.indexOf(header) ?? -1];
   expect(value("Output AH / Item")).toBe("10s (8 listed)");
+  // The fixture's invented ruleset has no Hyjal market, so nothing is guessed.
+  expect(value("Hyjal AH")).toBe("No Hyjal market");
+  expect(value("Hyjal URL")).toBe("");
   expect(value("Materials AH / Craft")).toBe("74c");
   expect(value("Materials per Craft")).toBe("2 × Invented 🌿 Herb — 37c each");
   expect(value("AH Snapshot (UTC)")).toBe(book.auctionsUpdatedAt ?? "");
@@ -427,6 +431,67 @@ test("price columns and linked material text stay literal in Sheets, CSV and XLS
       .map((file) => strFromU8(file))
       .join(""),
   ).not.toContain("<f>");
+});
+
+test("Hyjal AH links the crafted item for the configured market in Sheets and XLSX", async () => {
+  const current = await refreshAuctionPrices(
+    input(),
+    { auctionPrices: async () => book },
+    undefined,
+    now,
+  );
+  const roleplay = {
+    ...current,
+    auctionMarket: {
+      ...(current.auctionMarket ?? market),
+      rulesetName: "Roleplay",
+    },
+  };
+  const tables = buildTables(roleplay),
+    table = tables.find((t) => t.name === "Recipes");
+  if (!table) throw new Error("fixture");
+  const column = table.rows[0]?.indexOf("Hyjal AH") ?? -1;
+  expect(table.rows[0]?.[column - 1]).toBe("Output AH / Item");
+  expect(table.rows[0]?.[column + 1]).toBe("Materials AH / Craft");
+  const outputId =
+    table.rows[1]?.[table.rows[0]?.indexOf("Output Item ID") ?? -1];
+  const url = `https://hyjal.cc/auctions/us/rp-pve/alliance/item/${outputId}`;
+  expect(table.rows[1]?.[column]).toBe("View on Hyjal");
+  expect(table.rows[1]?.at(table.rows[0]?.indexOf("Hyjal URL") ?? -1)).toBe(
+    url,
+  );
+  expect(table.links).toContainEqual({ row: 1, column, url });
+  expect(JSON.stringify(sheetRequests(tables, []))).toContain(
+    `"link":{"uri":"${url}"}`,
+  );
+  expect(columnPresentation("Recipes", "Hyjal AH").hidden).toBe(false);
+  expect(columnPresentation("Recipes", "Hyjal URL").hidden).toBe(true);
+  // XLSX may widen the materials column, so locate the linked cell by text.
+  const files = unzipSync(toXlsx(tables));
+  const rels = strFromU8(
+    files["xl/worksheets/_rels/sheet3.xml.rels"] ?? new Uint8Array(),
+  );
+  const rel = rels.match(
+    new RegExp(`Id="(link\\d+)"[^>]*Target="${url.replaceAll(".", "\\.")}"`),
+  )?.[1];
+  const sheet = strFromU8(
+    files["xl/worksheets/sheet3.xml"] ?? new Uint8Array(),
+  );
+  const ref = sheet.match(
+    new RegExp(`<hyperlink ref="([A-Z]+2)" r:id="${rel}"/>`),
+  )?.[1];
+  expect(ref).toBeDefined();
+  expect(sheet).toMatch(
+    new RegExp(`<c r="${ref}"[^>]*>(?:(?!</c>).)*View on Hyjal`),
+  );
+  const unconfigured = buildTables({
+    ...roleplay,
+    auctionMarket: undefined,
+  }).find((t) => t.name === "Recipes");
+  expect(
+    unconfigured?.rows[1]?.[unconfigured.rows[0]?.indexOf("Hyjal AH") ?? -1],
+  ).toBe("Not configured");
+  expect(JSON.stringify(unconfigured?.links)).not.toContain("hyjal.cc");
 });
 
 test("margin per craft uses the yield range, colors only an unambiguous gain or loss, and never colors unknowns", async () => {

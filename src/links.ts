@@ -28,6 +28,34 @@ export function itemUrl(itemId: number): string {
   return `https://www.wowhead.com/forever/item=${itemIdSchema.parse(itemId)}`;
 }
 
+// Hyjal's public auction browser names Forever rulesets by these market slugs;
+// unlisted rulesets get no link rather than a guessed one. Verified 2026-11-12
+// against the ruleset index (Normal, PvP, Roleplay, Roleplay PvP) and hyjal.cc:
+// KR and TW serve only pve/pvp (their roleplay pages return 404).
+const hyjalMarkets: Record<string, string> = {
+  Normal: "pve",
+  PvP: "pvp",
+  Roleplay: "rp-pve",
+  "Roleplay PvP": "rp-pvp",
+};
+const hyjalPath =
+  /^\/auctions\/(?:(?:us|eu)\/(?:pve|pvp|rp-pve|rp-pvp)|(?:kr|tw)\/(?:pve|pvp))\/(?:alliance|horde|blackwater)\/item\/[1-9]\d{0,9}$/;
+
+// The item ID alone resolves; Hyjal redirects to its own name slug, so no
+// API-provided name ever enters the URL.
+export function hyjalItemUrl(
+  region: string,
+  market: { rulesetName: string; faction: "Alliance" | "Horde" | "Blackwater" },
+  itemId: number,
+): string | undefined {
+  const slug = Object.hasOwn(hyjalMarkets, market.rulesetName)
+    ? hyjalMarkets[market.rulesetName]
+    : undefined;
+  if (!slug) return undefined;
+  const url = `https://hyjal.cc/auctions/${regionSchema.parse(region)}/${slug}/${market.faction.toLowerCase()}/item/${itemIdSchema.parse(itemId)}`;
+  return hyjalPath.test(new URL(url).pathname) ? url : undefined;
+}
+
 export function assertPublicLink(value: string): void {
   try {
     const url = new URL(value);
@@ -61,6 +89,13 @@ export function assertPublicLink(value: string): void {
     )
       return;
     if (
+      url.hostname === "hyjal.cc" &&
+      !url.search &&
+      hyjalPath.test(url.pathname) &&
+      itemIdSchema.safeParse(Number(url.pathname.split("/").at(-1))).success
+    )
+      return;
+    if (
       url.hostname === "www.wowhead.com" &&
       url.pathname === "/forever/search" &&
       [...url.searchParams.keys()].length === 1 &&
@@ -74,7 +109,7 @@ export function assertPublicLink(value: string): void {
     // Never echo a rejected target: it could contain credentials or private data.
   }
   throw new SafeError(
-    "Workbook hyperlink is not an allowed public Armory, Wowhead Forever, or upstream repository link.",
+    "Workbook hyperlink is not an allowed public Armory, Wowhead Forever, Hyjal auction, or upstream repository link.",
   );
 }
 

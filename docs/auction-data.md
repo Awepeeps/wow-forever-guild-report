@@ -100,3 +100,26 @@ explicit bounds. Lowest-price estimates are asking-price indicators and may
 understate the cost of purchasing all required materials. They are not profit
 or sale-rate guarantees; no vendor costs, fees or unverified market prices
 should be silently substituted.
+
+## Hyjal item links
+
+Checked 2026-11-12. The Recipes tab's **Hyjal AH** column links each crafted
+item to [hyjal.cc](https://hyjal.cc/auctions), an independent third-party
+browser of the same Blizzard listings, as
+`https://hyjal.cc/auctions/<region>/<market>/<faction>/item/<itemId>`. A
+slug-less item URL returns 200 after redirecting to Hyjal's named page, so no
+item name enters the URL.
+
+| Forever ruleset (API name) | Hyjal market | Regions served |
+| -------------------------- | ------------ | -------------- |
+| Normal                     | `pve`        | US, EU, KR, TW |
+| PvP                        | `pvp`        | US, EU, KR, TW |
+| Roleplay                   | `rp-pve`     | US, EU         |
+| Roleplay PvP               | `rp-pvp`     | US, EU         |
+
+Ruleset names come from the US `/data/wow/ruleset/{id}` responses (IDs 2, 1, 3
+and 15 respectively). KR/TW roleplay market pages returned 404. Hyjal's page
+titles also show house IDs (for example US RP-PvE as #119, matching the
+in-game verification above), but this tool does not use them to choose a
+market. Hyjal refreshes on its own schedule, so its listings can differ from
+the export's snapshot.

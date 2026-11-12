@@ -36,7 +36,8 @@ Before refreshing, it saves the current snapshot under `output/roster/backups/`
 and keeps the latest 14 snapshots. Refresh exit 0 or 2 can publish, provided a
 validated snapshot was generated during this run, is newer than the previous
 snapshot, and is not an empty guild roster. Exit 2 publishes visibly incomplete
-data with the existing retained values and last-success labels. Any other refresh
+data: failed character components are blanked and labelled, with last-success
+timestamps kept. Any other refresh
 exit stops publication. Successful daily runs return the refresh exit (0 or 2).
 
 Before the single publication attempt it writes

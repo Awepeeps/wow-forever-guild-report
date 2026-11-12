@@ -280,23 +280,27 @@ test("unverified formula locales and missing locale fail closed instead of publi
   }
 });
 
-test("a supplied level is retained detail when both character endpoints are unavailable", () => {
+test("guild-list level is not profile detail, but a configured profile metric is, when both character endpoints are unavailable", () => {
   const base = snapshot.rows[0];
   if (!base) throw new Error("fixture");
-  const table = buildTables({
-    ...snapshot,
-    rows: [
-      {
-        ...base,
-        profileStatus: "unavailable",
-        talentStatus: "unavailable",
-        character: { ...base.character, level: 7 },
-      },
-    ],
-  })[0];
-  expect(
-    table?.rows[1]?.[table.rows[0]?.indexOf("Character API Status") ?? -1],
-  ).toBe("Incomplete");
+  const status = (extra: object) => {
+    const table = buildTables({
+      ...snapshot,
+      rows: [
+        {
+          ...base,
+          profileStatus: "unavailable",
+          talentStatus: "unavailable",
+          character: { ...base.character, level: 7, class: "Priest", ...extra },
+        },
+      ],
+    })[0];
+    return table?.rows[1]?.[
+      table.rows[0]?.indexOf("Character API Status") ?? -1
+    ];
+  };
+  expect(status({})).toBe("Unavailable");
+  expect(status({ equippedItemLevel: 12 })).toBe("Incomplete");
 });
 
 test("production file export writes static UTC relative dates, an explicit export header, and no XP", async () => {

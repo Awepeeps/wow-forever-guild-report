@@ -164,6 +164,7 @@ export function columnPresentation(
     "Auction Last Attempt",
     "Auctions Updated (UTC)",
     "Commodities Updated (UTC)",
+    "Hyjal URL",
   ]);
   const hidden =
     technical.has(header) ||
@@ -193,6 +194,7 @@ export function columnPresentation(
     "Materials per Craft": 280,
     "Recipe Details": 170,
     "Output AH / Item": 180,
+    "Hyjal AH": 120,
     "Materials AH / Craft": 180,
     "AH Margin / Craft": 170,
     "AH Data": 200,
