@@ -62,7 +62,7 @@ Description=Refresh and publish the WoW Forever guild report
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/projects/deathpie/wow-forever-guild-report
+WorkingDirectory=%h/projects/deathpie/awepeeps/wow-forever-guild-report
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 UMask=0077
 ExecStart=/usr/bin/just daily
