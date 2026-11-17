@@ -7,7 +7,7 @@ import {
 } from "./model.ts";
 
 export const upstreamRepositoryUrl =
-  "https://github.com/Awepeeps/wow-forever-guild-report";
+  "https://github.com/awepeeps/wow-forever-guild-report";
 export const upstreamIssuesUrl = `${upstreamRepositoryUrl}/issues`;
 // Fixed, user-requested Blizzard pages explaining how a player opts out of
 // third-party API access to their game data.
